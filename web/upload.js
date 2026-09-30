@@ -1,4 +1,4 @@
-import { PANEL_W, PANEL_H, DEFAULTS, ditherToPalette, rotatePortraitToPanel, pack, indicesToRGBA } from "./dither.js";
+import { sizeFor, toPanelOrder, panelOf, DEFAULTS, ditherToPalette, pack, indicesToRGBA } from "./dither.js";
 import { ago, until, batteryPct, LOW_BATTERY_PCT, rotateLabel, checkLabel, hourLabel } from "./format.js";
 
 const $ = (id) => document.getElementById(id);
@@ -95,17 +95,20 @@ const lazyThumbs = new IntersectionObserver((entries) => {
 
 /** The orientation a picture was made for (older pictures without a note: landscape). */
 const madeFor = (p) => p.edits?.orientation || p.edits?.orient || "landscape";
+const framePanel = () => frameInfo?.settings?.panel || "7.3";
 
 function showHang(info) {
   const hang = info.settings.orientation || "landscape";
   $("hang").hidden = false;
   for (const r of document.querySelectorAll("input[name=hang]")) r.checked = r.value === hang;
   // Pictures made for the other orientation would show sideways
-  const off = info.pictures.filter((p) => madeFor(p) !== hang);
+  const panel = info.settings.panel || "7.3";
+  $("hang-label").textContent = `${panelOf(panel).name} screen · hangs`;
+  const off = info.pictures.filter((p) => madeFor(p) !== hang || (p.panel || "7.3") !== panel);
   const fixable = off.filter((p) => p.hasOriginal);
   $("hang-mismatch").hidden = !off.length;
   $("hang-mismatch-text").textContent =
-    `${plural(off.length, "picture")} ${off.length === 1 ? "was" : "were"} made for a ${hang === "portrait" ? "landscape" : "portrait"} frame and will show sideways.` +
+    `${plural(off.length, "picture")} ${off.length === 1 ? "was" : "were"} made for a different screen size or orientation (this frame is a ${panelOf(panel).name} screen hung ${hang}), so ${off.length === 1 ? "it" : "they"} won't show correctly.` +
     (fixable.length < off.length ? ` ${fixable.length ? `${fixable.length} can be rebuilt; the others` : "They"} were uploaded before editing was possible, so upload those photos again.` : "");
   $("hang-rebuild").hidden = !fixable.length;
   $("hang-rebuild").textContent = fixable.length === off.length ? "Rebuild them" : `Rebuild ${fixable.length}`;
@@ -430,7 +433,8 @@ const signed = (v, neg, pos) => (Math.abs(v) < 0.01 ? "neutral" : `${Math.round(
  */
 function effectiveFit(o) {
   if (o.fit !== "auto") return o.fit;
-  const ratio = source.width / source.height, target = o.portrait ? PANEL_H / PANEL_W : PANEL_W / PANEL_H;
+  const { w, h } = sizeFor(framePanel(), o.portrait);
+  const ratio = source.width / source.height, target = w / h;
   return Math.abs(Math.log(ratio / target)) < 0.35 ? "cover" : "contain";
 }
 
@@ -521,8 +525,8 @@ let composed = { key: "", img: null };
 function render(quick = false) {
   if (!source) return Promise.resolve(false);
   const o = opts();
-  const w = o.portrait ? PANEL_H : PANEL_W;
-  const h = o.portrait ? PANEL_W : PANEL_H;
+  const panel = framePanel();
+  const { w, h } = sizeFor(panel, o.portrait);
   const pv = $("preview");
   if (pv.width !== w || pv.height !== h) {
     pv.width = w;
@@ -543,7 +547,7 @@ function render(quick = false) {
       if (label) stampLabel(idx, w, h, label);
       dithered = new ImageData(indicesToRGBA(idx), w, h);
       if (pv.width === w && pv.height === h && !comparing) pv.getContext("2d").putImageData(dithered, 0, 0);
-      packed = pack(portrait ? rotatePortraitToPanel(idx) : idx);
+      packed = pack(toPanelOrder(idx, w, h, panel));
     },
   }));
 }
@@ -561,8 +565,9 @@ function stampLabel(idx, w, h, text) {
   c.width = w;
   c.height = h;
   const ctx = c.getContext("2d", { willReadFrequently: true });
-  ctx.font = "600 22px ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif";
-  const pad = 10, margin = 14, bh = 36;
+  const k = Math.min(w, h) / 480; // same size on a 13.3" screen
+  ctx.font = `600 ${Math.round(22 * k)}px ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif`;
+  const pad = Math.round(10 * k), margin = Math.round(14 * k), bh = Math.round(36 * k);
   const bw = Math.round(Math.min(w - 2 * margin, ctx.measureText(text).width + 2 * pad));
   const x = w - margin - bw, y = h - margin - bh;
   ctx.fillStyle = "#fff";
@@ -1111,7 +1116,7 @@ $("show-name").addEventListener("change", () => { try { localStorage.setItem("do
 /** The settings a picture was made with, saved so it can be edited again. */
 function editsOf(p) {
   return {
-    v: 2, orientation: framePortrait() ? "portrait" : "landscape", zoom: p.zoom, pan: { x: Math.round(p.pan.x), y: Math.round(p.pan.y) },
+    v: 2, panel: framePanel(), orientation: framePortrait() ? "portrait" : "landscape", zoom: p.zoom, pan: { x: Math.round(p.pan.x), y: Math.round(p.pan.y) },
     look: p.look, label: labelFor(p),
   };
 }
@@ -1130,7 +1135,16 @@ async function originalOf(p) {
 /** Send the photo that's in the editor: a new upload, or a replacement when editing. */
 async function uploadCurrent(queue = "next") {
   const p = photos[cur];
-  const preview = await new Promise((r) => $("preview").toBlob(r, "image/png"));
+  // Big screens get a half-size preview, to keep uploads small
+  const pv = $("preview");
+  let pc = pv;
+  if (pv.width > 800) {
+    pc = document.createElement("canvas");
+    pc.width = pv.width / 2;
+    pc.height = pv.height / 2;
+    pc.getContext("2d").drawImage(pv, 0, 0, pc.width, pc.height);
+  }
+  const preview = await new Promise((r) => pc.toBlob(r, "image/png"));
   const form = new FormData();
   form.append("image", new Blob([packed], { type: "application/octet-stream" }), "image.bin");
   form.append("preview", preview, "preview.png");

@@ -2,7 +2,10 @@
 
 Battery-powered color e-paper photo frames. Friends send pictures from a link on their phone; the frame picks them up on its next check-in.
 
-- **Frame:** Seeed XIAO ePaper Display Board EE04 (XIAO ESP32-S3 Plus) + Seeed 7.3" E Ink Spectra 6 panel (800×480) + 3.7 V LiPo
+- **Frame:** one of
+  - Seeed XIAO ePaper Display Board **EE04** (XIAO ESP32-S3 Plus) + Seeed **7.3"** E Ink Spectra 6 panel (800×480), or
+  - Seeed XIAO ePaper Display Board **EE02** (XIAO ESP32-S3 Plus) + Seeed **13.3"** E Ink Spectra 6 panel (1200×1600)
+  - plus a 3.7 V LiPo
 - **Server:** Netlify (static site + Functions + Blobs) at `domiframe.com`
 - **Upload page:** dithers the photo to the panel's 6 inks in the browser, so the server just stores bytes
 
@@ -55,7 +58,7 @@ Each frame keeps up to 200 pictures, optionally sorted into folders; the frame c
 
 "admin" means `Authorization: Bearer <ADMIN_TOKEN>`; "upload key" means `Authorization: Bearer <uploadKey>`.
 
-Image format: 800×480, 4 bits per pixel, two pixels per byte (high nibble = left), 192,000 bytes.
+Image format: 4 bits per pixel, two pixels per byte (high nibble = left), rows in the panel's own layout: 7.3" = 800×480 (192,000 bytes), 13.3" = 1200×1600 (960,000 bytes). Pictures made for the frame's orientation are turned 90° clockwise when it hangs the other way from the panel's rows (`toPanelOrder` in `web/dither.js`). Each frame has a `panel` setting (`"7.3"` or `"13.3"`); the firmware reports it on every check-in (`X-Panel`), and pictures made for another screen size are never sent.
 Palette indices: `0 black, 1 white, 2 yellow, 3 red, 4 blue, 5 green` (shared by `web/dither.js` and `firmware/src/main.cpp`).
 
 Keys are stored as SHA-256 hashes. The upload key travels in the link's `#fragment`, so it isn't sent in page requests or server logs.
@@ -82,8 +85,10 @@ Save the response: send `uploadLink` to your friend, and enter `id` + `deviceKey
 
 ## Flash and set up a frame
 
-1. Set the EE04 jumper to **50-pin** for the Seeed 7.3" panel.
-2. `cd firmware && pio run -t upload` (PlatformIO), with the board on USB-C.
+1. 7.3": set the EE04 jumper to **50-pin** for the Seeed 7.3" panel. 13.3": connect the panel to the EE02's 60-pin connector.
+2. Flash the build for your screen (PlatformIO), with the board on USB-C:
+   - 7.3" on EE04: `cd firmware && pio run -e ee04 -t upload`
+   - 13.3" on EE02: `cd firmware && pio run -e ee02-13in3 -t upload`
 3. On first boot the screen says **Wi-Fi setup**. Join the `DomiFrame-Setup` Wi-Fi from a phone, pick the home network, fill in **Frame ID** and **Device key**, and choose how the frame hangs (landscape or portrait). The orientation can also be changed later on the upload or admin page.
 4. To redo setup later (new home Wi-Fi), hold **KEY3** while pressing reset.
 5. **KEY1** wakes the frame to check for a new picture immediately.
@@ -112,7 +117,9 @@ To test schedules, the virtual frame can follow the server's `X-Sleep-Minutes` i
 
 ## Status / to verify on real hardware
 
-- Firmware **compiles** (CI builds it on every push) but has **not run on hardware yet**. Pins come from Seeed's `Seeed_GFX` EE04 setup and the EE04 wiki; the display uses GxEPD2's `GxEPD2_730c_GDEP073E01` driver, which targets the same ED2208 controller as Seeed's 7.3" Spectra 6 panel.
+- Firmware **compiles** (CI builds both screens on every push) but has **not run on hardware yet**. 7.3": pins come from Seeed's `Seeed_GFX` EE04 setup and the EE04 wiki; the display uses GxEPD2's `GxEPD2_730c_GDEP073E01` driver, which targets the same ED2208 controller as Seeed's 7.3" Spectra 6 panel. 13.3": uses Seeed's own `Seeed_GFX` (`BOARD_SCREEN_COMBO=510`, T133A01 driver), pinned to a known commit.
+- EE02 buttons and battery pins aren't published; the 13.3" build assumes they match the EE04 (its display pins do). Check against the EE02 schematic.
+- On a frame hung the other way from its panel's rows (a portrait 7.3", a landscape 13.3"), check that pictures and status messages are the right way up; if not, flip `rotateCW` in `web/dither.js` and the rotation in `showMessage()`.
 - TLS: the frame currently skips certificate verification (`setInsecure()`). Pin the Let's Encrypt root before giving frames away.
 - How each frame hangs (landscape or portrait) is a frame setting. Pictures for a portrait frame are packed turned 90° clockwise onto the panel; if they come out upside down on a real portrait-hung frame, flip the rotation in `web/dither.js` (`rotatePortraitToPanel`).
 - Palette RGB values in `web/dither.js` are approximations of the real inks; tune them after comparing the preview with the panel.

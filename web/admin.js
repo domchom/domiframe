@@ -80,7 +80,7 @@ function render(frames) {
       f.fw && `fw ${f.fw}`,
     ].filter(Boolean).join(" · ");
     const hang = f.settings.orientation || "landscape";
-    const pics = el("p", "muted small", `hangs ${hang} · ` +
+    const pics = el("p", "muted small", `${f.settings.panel || "7.3"}" screen · hangs ${hang} · ` +
       `${f.pictures.length} picture${f.pictures.length === 1 ? "" : "s"}` +
       (unseen ? ` (${unseen} new)` : "") +
       (f.settings.album ? ` · shows “${f.albums.find((a) => a.id === f.settings.album)?.name}”` : "") +
@@ -162,7 +162,10 @@ $("new-id").addEventListener("input", () => ($("new-id").dataset.edited = "1"));
 
 $("create-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const res = await api("", { method: "POST", body: JSON.stringify({ id: $("new-id").value.trim(), name: $("new-name").value.trim() }) });
+  const res = await api("", {
+    method: "POST",
+    body: JSON.stringify({ id: $("new-id").value.trim(), name: $("new-name").value.trim(), panel: $("new-panel").value }),
+  });
   const data = await res.json();
   if (!res.ok) return setMsg("create-msg", data.error || res.statusText, "err");
   setMsg("create-msg", "");

@@ -53,6 +53,12 @@
           <label class="slider">Frame ID <span class="muted">(lowercase letters, digits, dashes)</span>
             <input id="new-id" class="text" pattern="[a-z0-9][a-z0-9\-]{1,31}" placeholder="emma" required>
           </label>
+          <label class="slider">Screen
+            <select id="new-panel">
+              <option value="7.3">7.3" Spectra 6 (EE04 board)</option>
+              <option value="13.3">13.3" Spectra 6 (EE02 board)</option>
+            </select>
+          </label>
           <button class="primary">Create frame</button>
         </form>
         <p id="create-msg" class="msg" role="status"></p>

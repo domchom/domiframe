@@ -14,10 +14,10 @@
       background: #2a2826; padding: 18px; border-radius: 10px;
       box-shadow: 0 8px 30px rgba(0,0,0,.25), inset 0 0 0 2px #3a3733;
     }
-    canvas { display: block; width: 100%; height: auto; aspect-ratio: 800 / 480; background: #e8e8e8; image-rendering: pixelated; }
-    /* A frame hung portrait: the same panel, turned upright */
+    canvas { display: block; width: 100%; height: auto; background: #e8e8e8; image-rendering: pixelated; }
+    /* A frame hung portrait: shown upright, as tall as fits */
     .bezel.portrait { width: fit-content; margin: 0 auto; }
-    .bezel.portrait canvas { width: auto; height: min(75vh, 800px); aspect-ratio: 480 / 800; }
+    .bezel.portrait canvas { width: auto; height: min(75vh, 800px); }
     .keys { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
     .keys button, .keys select { width: auto; margin: 0; font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
     .keys button.primary { background: var(--accent); color: #fff; border-color: transparent; }
@@ -59,6 +59,9 @@
       <label>Frame ID <input id="id" autocomplete="off"></label>
       <label>Device key <input id="key" autocomplete="off"></label>
       <label>Battery <span><input id="mv" type="range" min="3300" max="4200" step="10" value="3900" style="width:70%"> <span id="mvText"></span></span></label>
+      <label>Screen
+        <select id="screen-size" style="font:inherit;padding:6px"><option value="7.3">7.3" (EE04)</option><option value="13.3">13.3" (EE02)</option></select>
+      </label>
       <label>How the frame hangs
         <select id="hang" style="font:inherit;padding:6px"><option value="landscape">Landscape (wide)</option><option value="portrait">Portrait (tall)</option></select>
       </label>
@@ -71,30 +74,41 @@
   </main>
 
   <script type="module">
-    import { PALETTE, PANEL_W as W, PANEL_H as H } from "/dither.js";
+    import { PALETTE, PANELS } from "/dither.js";
 
     const $ = (id) => document.getElementById(id);
-    // Everything is drawn on an 800×480 "panel", exactly as the hardware does; the screen shows it
-    // turned upright when the frame hangs portrait (the server says so in X-Orientation).
+    // Everything is drawn on a "panel" canvas in the panel's own pixel layout, exactly as the
+    // hardware does (7.3": 800×480, 13.3": 1200×1600). The screen shows it upright for how the
+    // frame hangs (the server says so in X-Orientation).
     const panel = document.createElement("canvas");
-    panel.width = 800;
-    panel.height = 480;
     const ctx = panel.getContext("2d");
+    let W = 800, H = 480, screenSize = "7.3";
+    function setScreen(id) {
+      const p = PANELS[id] || PANELS["7.3"];
+      screenSize = PANELS[id] ? id : "7.3";
+      [W, H] = p.native === "landscape" ? [p.w, p.h] : [p.h, p.w];
+      panel.width = W;
+      panel.height = H;
+      ctx.fillStyle = "rgb(232,232,232)";
+      ctx.fillRect(0, 0, W, H);
+    }
     let hang = "landscape";
     let hangPending = null; // chosen here, not yet confirmed by the server
+    // Hung the other way from how the panel's rows run: pictures arrive turned 90° clockwise
+    const turned = () => (hang === "portrait") !== (H > W);
     function show() {
       const screen = $("screen");
-      const portrait = hang === "portrait";
-      const [w, h] = portrait ? [480, 800] : [800, 480];
+      const [w, h] = turned() ? [H, W] : [W, H];
       if (screen.width !== w || screen.height !== h) { screen.width = w; screen.height = h; }
-      screen.closest(".bezel").classList.toggle("portrait", portrait);
+      screen.style.aspectRatio = `${w} / ${h}`;
+      screen.closest(".bezel").classList.toggle("portrait", h > w);
       const sctx = screen.getContext("2d");
-      // Portrait pictures are packed turned 90° clockwise; turn the panel back to view it upright
-      if (portrait) sctx.setTransform(0, -1, 1, 0, 0, 800);
+      // Turn the panel back, so the picture is upright
+      if (turned()) sctx.setTransform(0, -1, 1, 0, 0, W);
       else sctx.setTransform(1, 0, 0, 1, 0, 0);
       sctx.drawImage(panel, 0, 0);
     }
-    const FW = "sim-0.2";
+    const FW = "sim-0.3";
     const store = {
       get: (k) => { try { return localStorage.getItem("sim:" + k) || ""; } catch { return ""; } },
       set: (k, v) => { try { localStorage.setItem("sim:" + k, v); } catch {} },
@@ -135,22 +149,22 @@
       show();
     }
 
-    // Same layout as showMessage() in firmware/src/main.cpp, which draws upright for a
-    // portrait-hung frame (GxEPD2 rotation 1: the text's top is the panel's right edge)
+    // Same layout as showMessage() in firmware/src/main.cpp (doubled on the 13.3"), drawn upright
+    // however the frame hangs (rotation 1 when turned: the text's top is the panel's right edge)
     const message = (title, line1, line2) => refresh(() => {
-      const portrait = hang === "portrait";
       const m = document.createElement("canvas");
-      m.width = portrait ? H : W;
-      m.height = portrait ? W : H;
+      m.width = turned() ? H : W;
+      m.height = turned() ? W : H;
+      const k = screenSize === "13.3" ? 2 : 1;
       const c = m.getContext("2d");
       c.fillStyle = rgb(1); c.fillRect(0, 0, m.width, m.height);
       c.fillStyle = rgb(0);
-      c.font = "bold 34px Helvetica, Arial, sans-serif"; c.fillText(title, 40, 120);
-      c.font = "24px Helvetica, Arial, sans-serif"; c.fillText(line1, 40, 190);
-      if (line2) c.fillText(line2, 40, 230);
-      [3, 2, 5, 4].forEach((k, i) => { c.fillStyle = rgb(k); c.fillRect(40 + i * 60, 400, 60, 12); });
+      c.font = `bold ${34 * k}px Helvetica, Arial, sans-serif`; c.fillText(title, 40 * k, 120 * k);
+      c.font = `${24 * k}px Helvetica, Arial, sans-serif`; c.fillText(line1, 40 * k, 190 * k);
+      if (line2) c.fillText(line2, 40 * k, 230 * k);
+      [3, 2, 5, 4].forEach((b, i) => { c.fillStyle = rgb(b); c.fillRect((40 + i * 60) * k, 400 * k, 60 * k, 12 * k); });
       ctx.save();
-      if (portrait) ctx.setTransform(0, 1, -1, 0, W, 0);
+      if (turned()) ctx.setTransform(0, 1, -1, 0, W, 0);
       ctx.drawImage(m, 0, 0);
       ctx.restore();
     });
@@ -159,13 +173,13 @@
     const drawPacked = (buf) => refresh(() => {
       const img = ctx.createImageData(W, H);
       const pal = PALETTE.map((p) => p.rgb);
-      for (let i = 0; i < buf.length; i++) {
+      const d = img.data;
+      for (let i = 0, o = 0; i < buf.length; i++) {
         const b = buf[i];
-        for (const [n, idx] of [[0, b >> 4], [1, b & 0x0f]]) {
-          const [r, g, bl] = pal[idx % 6];
-          const o = (i * 2 + n) * 4;
-          img.data[o] = r; img.data[o + 1] = g; img.data[o + 2] = bl; img.data[o + 3] = 255;
-        }
+        let c = pal[(b >> 4) % 6];
+        d[o++] = c[0]; d[o++] = c[1]; d[o++] = c[2]; d[o++] = 255;
+        c = pal[(b & 0x0f) % 6];
+        d[o++] = c[0]; d[o++] = c[1]; d[o++] = c[2]; d[o++] = 255;
       }
       ctx.putImageData(img, 0, 0);
     });
@@ -196,6 +210,7 @@
         const headers = { "X-Device-Key": key, "X-Battery-Mv": $("mv").value, "X-Fw": FW };
         if (etag) headers["If-None-Match"] = etag;
         if (hangPending) headers["X-Set-Orientation"] = hangPending; // like the real frame's setup portal
+        headers["X-Panel"] = screenSize; // the firmware reports the screen it was built for
         const res = await fetch(`/api/frames/${encodeURIComponent(id)}/image`, { headers, cache: "no-store" });
         const sleep = Number(res.headers.get("x-sleep-minutes")) || 0;
         if (res.ok || res.status === 304) hangPending = null; // the server has it now
@@ -234,6 +249,14 @@
     }
 
     $("key1").addEventListener("click", () => wake("KEY1"));
+    $("screen-size").addEventListener("change", () => {
+      setScreen($("screen-size").value);
+      store.set("screen", screenSize);
+      etag = ""; // a new screen: fetch the picture made for it
+      log(`screen is now ${screenSize}"; telling the server`);
+      show();
+      wake("screen");
+    });
     $("hang").addEventListener("change", () => {
       hangPending = $("hang").value;
       log(`set to hang ${hangPending}; telling the server`);
@@ -267,6 +290,8 @@
     showClock();
 
     // Blank panel until first wake, like a fresh device.
+    setScreen(hash.get("screen") || store.get("screen") || "7.3");
+    $("screen-size").value = screenSize;
     ctx.fillStyle = rgb(1); ctx.fillRect(0, 0, W, H);
     show();
     if ($("id").value && $("key").value) wake("boot");
