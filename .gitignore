@@ -1,0 +1,8 @@
+node_modules/
+.netlify/
+.env
+.DS_Store
+
+# PlatformIO
+firmware/.pio/
+firmware/.vscode/

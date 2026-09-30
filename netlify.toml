@@ -1,0 +1,15 @@
+[build]
+  publish = "web"
+  functions = "netlify/functions"
+
+# Friend upload links look like https://domiframe.com/f/<frame-id>#k=<upload-key>
+[[redirects]]
+  from = "/f/*"
+  to = "/upload.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"

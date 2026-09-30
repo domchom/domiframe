@@ -1,0 +1,14 @@
+{
+  "name": "domiframe",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Battery-powered color e-paper photo frames with a simple web upload page.",
+  "scripts": {
+    "dev": "netlify dev",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^11.1.2"
+  }
+}
