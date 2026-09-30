@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>DomiFrame Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" defer></script>
+</head>
+<body>
+  <main class="wrap admin">
+    <header class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <h1>DomiFrame admin</h1>
+      <button type="button" id="signout" class="link" hidden>Sign out</button>
+    </header>
+
+    <section class="card" id="signin">
+      <h2>Sign in</h2>
+      <p class="muted small">Enter the <code>ADMIN_TOKEN</code> from your Netlify environment variables. It's saved in this browser only.</p>
+      <form id="signin-form" class="stack">
+        <input type="password" id="token" class="text" autocomplete="current-password" placeholder="Admin token" required>
+        <button class="primary">Sign in</button>
+      </form>
+      <p id="signin-msg" class="msg" role="status"></p>
+    </section>
+
+    <div id="app" hidden>
+      <section class="card" id="result" hidden>
+        <h2 id="result-title"></h2>
+        <p class="muted small" id="result-note"></p>
+        <div id="result-body" class="stack"></div>
+        <button type="button" class="chip" id="result-close">Done</button>
+      </section>
+
+      <section class="card">
+        <div class="row between">
+          <h2>Frames</h2>
+          <button type="button" class="chip" id="refresh">Refresh</button>
+        </div>
+        <ul id="frames" class="frames"></ul>
+        <p id="frames-msg" class="msg muted small" role="status"></p>
+      </section>
+
+      <section class="card">
+        <h2>Add a frame</h2>
+        <form id="create-form" class="stack">
+          <label class="slider">Name <input id="new-name" class="text" maxlength="60" placeholder="Emma's frame" required></label>
+          <label class="slider">Frame ID <span class="muted">(lowercase letters, digits, dashes)</span>
+            <input id="new-id" class="text" pattern="[a-z0-9][a-z0-9\-]{1,31}" placeholder="emma" required>
+          </label>
+          <button class="primary">Create frame</button>
+        </form>
+        <p id="create-msg" class="msg" role="status"></p>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="/admin.js"></script>
+</body>
+</html>
