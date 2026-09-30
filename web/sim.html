@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Virtual Frame</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/brand.js"></script>
+  <link rel="stylesheet" href="/sim.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="brand"><h1>Virtual frame</h1><span class="mark" aria-hidden="true"></span></header>
+    <p class="intro">A frame in a browser tab, for trying DomiFrame without the hardware. It behaves like the
+      firmware: on setup it makes its own frame code and shows it on the screen, sends the device key,
+      battery and ETag, opens the sealed picture with its code, redraws only on a new picture, and sleeps
+      as long as the server says. The device key and code stay in this browser. <span id="status"></span></p>
+
+    <div class="device" id="device">
+      <div class="bezel">
+        <canvas id="screen" width="800" height="480"></canvas>
+        <div class="chin"><span><i class="led" id="led"></i>DomiFrame</span><span id="chin-model">Spectra 6</span></div>
+      </div>
+    </div>
+
+    <div class="panels">
+      <section class="card">
+        <h3>Buttons</h3>
+        <div class="keys">
+          <button id="key1" class="primary">KEY1 · check now</button>
+          <button id="show-code" class="chip key">Show frame code</button>
+          <button id="new-code" class="chip key">New frame code</button>
+          <button id="key3" class="chip key">Forget ETag</button>
+          <a id="open-upload" class="chip key" target="_blank" rel="noopener" hidden>Open this frame's page</a>
+        </div>
+        <label class="slider">Wake by itself
+          <select id="auto">
+            <option value="0">Off: only when KEY1 is pressed</option>
+            <option value="1">On the server's schedule, real time</option>
+            <option value="60" data-dev>On the server's schedule, 1 h per minute</option>
+            <option value="3600" data-dev>On the server's schedule, 1 h per second</option>
+          </select>
+        </label>
+        <h3 data-dev>Skip ahead, then wake</h3>
+        <div class="keys skip" data-dev>
+          <button class="chip" data-skip="60">+1 hour</button>
+          <button class="chip" data-skip="1440">+1 day</button>
+          <button class="chip" data-skip="10080">+1 week</button>
+          <button class="chip" id="clock-reset">Reset</button>
+        </div>
+        <p id="clock"></p>
+      </section>
+
+      <section class="card">
+        <h3>Device</h3>
+        <div class="fields">
+          <label class="slider">Frame ID <input id="id" class="text" autocomplete="off"></label>
+          <label class="slider">Device key <input id="key" class="text" autocomplete="off"></label>
+          <label class="slider">Screen
+            <select id="screen-size"><option value="7.3">7.3" (EE04)</option><option value="13.3">13.3" (EE02)</option></select>
+          </label>
+          <label class="slider">Hangs
+            <select id="hang"><option value="landscape">Landscape (wide)</option><option value="portrait">Portrait (tall)</option></select>
+          </label>
+          <label class="slider">Refresh speed
+            <select id="speed"><option value="1">Instant</option><option value="4" selected>Quick (~4 s)</option><option value="20">Real (~20 s)</option></select>
+          </label>
+          <label class="slider">Battery
+            <span class="battery"><input id="mv" type="range" min="3300" max="4200" step="10" value="3900"><span id="mvText"></span></span>
+          </label>
+        </div>
+      </section>
+    </div>
+
+    <div class="log-head"><h3>Serial log</h3></div>
+    <div id="log"></div>
+  </main>
+
+  <script type="module" src="/sim.js"></script>
+</body>
+</html>

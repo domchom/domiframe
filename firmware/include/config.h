@@ -2,7 +2,7 @@
 
 // ---- Server ---------------------------------------------------------------
 #define SERVER_BASE "https://domiframe.art"
-#define FW_VERSION "0.5.0"
+#define FW_VERSION "0.6.0"
 
 // Check the server's HTTPS certificate against Mozilla's root CAs (data/cert). 0 skips the
 // check, for debugging only: anyone on the frame's network could then read its device key.

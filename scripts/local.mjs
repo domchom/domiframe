@@ -1,6 +1,6 @@
 // Run the whole thing locally, no Netlify account or frame hardware needed:
 //   npm run local
-// Serves web/, the API functions, and a virtual frame at /sim.html.
+// Serves web/, the API functions, and the virtual frame at /sim.html (also on the real site).
 // Blobs live in .local/blobs so pictures survive restarts; delete .local/ to start over.
 
 import { createServer } from "node:http";
@@ -27,14 +27,16 @@ globalThis.Netlify = { env: { get: (k) => process.env[k] } };
 const admin = (await import("../netlify/functions/admin-frames.mjs")).default;
 const frameImage = (await import("../netlify/functions/frame-image.mjs")).default;
 const frameInfo = (await import("../netlify/functions/frame-info.mjs")).default;
+const frameCode = (await import("../netlify/functions/frame-code.mjs")).default;
 const { loadFrame } = await import("../netlify/lib/common.mjs");
 globalThis.__domiframeClockOffset = 0;
 
 // Same routes as the functions' `config.path`.
 function route(pathname) {
   let m;
-  if ((m = pathname.match(/^\/api\/admin\/frames(?:\/([^/]+)(?:\/keys)?)?$/))) return { fn: admin, params: m[1] ? { id: m[1] } : {} };
+  if ((m = pathname.match(/^\/api\/admin\/frames(?:\/([^/]+)(?:\/(?:keys|settings))?)?$/))) return { fn: admin, params: m[1] ? { id: m[1] } : {} };
   if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/image$/))) return { fn: frameImage, params: { id: m[1] } };
+  if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/code$/))) return { fn: frameCode, params: { id: m[1] } };
   if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/(?:info|preview|settings|pictures(?:\/[^/]+){0,2}|albums(?:\/[^/]+)?)$/))) {
     return { fn: frameInfo, params: { id: m[1] } };
   }
@@ -64,11 +66,18 @@ const TYPES = {
   ".ico": "image/x-icon",
 };
 
+// The same security headers as the real site, read from netlify.toml, so a page that breaks the
+// CSP breaks here too (minus HSTS, which would stick localhost to HTTPS).
+const SECURITY_HEADERS = Object.fromEntries(
+  [...(await readFile(join(ROOT, "netlify.toml"), "utf8")).split("[headers.values]")[1].matchAll(/^\s*([\w-]+)\s*=\s*"(.*)"\s*$/gm)]
+    .map(([, k, v]) => [k.toLowerCase(), v])
+    .filter(([k]) => k !== "strict-transport-security"),
+);
+
 async function serveStatic(pathname) {
   if (pathname.startsWith("/f/")) pathname = "/upload.html"; // netlify.toml redirect
   if (pathname === "/") pathname = "/index.html";
-  // sim.html is local-only, so it lives outside web/ and never gets deployed
-  const base = pathname === "/sim.html" ? join(ROOT, "scripts") : join(ROOT, "web");
+  const base = join(ROOT, "web");
   const file = normalize(join(base, pathname));
   if (!file.startsWith(base)) return null;
   try {
@@ -80,7 +89,7 @@ async function serveStatic(pathname) {
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
-  const common = { "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" };
+  const common = SECURITY_HEADERS;
   try {
     if (url.pathname === "/__dev/clock") return devClock(req, res);
     const r = route(url.pathname);
@@ -128,7 +137,8 @@ async function demoFrame() {
       method: "POST",
       headers: { authorization: `Bearer ${ADMIN_TOKEN}`, "content-type": "application/json" },
       body: JSON.stringify({ id: "demo", name: "Demo frame" }),
-    })
+    }),
+    { params: {} },
   );
   const created = await res.json();
   if (res.status !== 201) throw new Error(`could not create demo frame: ${JSON.stringify(created)}`);
@@ -148,11 +158,13 @@ server.listen(PORT, () => {
   console.log(`
 DomiFrame running locally (no hardware needed)
 
-  Upload page (the friend's link):  ${demo.uploadLink}
-  Virtual frame:                    ${sim}
-  Admin page:                       http://localhost:${PORT}/admin.html  (token: ${ADMIN_TOKEN})
+  Virtual frame:  ${sim}
+  Home page:      http://localhost:${PORT}/#frame
+  Admin page:     http://localhost:${PORT}/admin.html  (token: ${ADMIN_TOKEN})
 
-Open both, send a picture from the upload page, then press KEY1 on the virtual frame.
+Open the virtual frame first: like a real frame, it makes its own frame code and shows it.
+Then press "Open this frame's page" (or enter ID ${demo.id} and the code under My frame),
+send a picture, and press KEY1 on the virtual frame.
 `);
 });
 

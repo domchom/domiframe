@@ -2,19 +2,20 @@
 //   GET  (the frame)   header X-Device-Key, optional If-None-Match, X-Battery-Mv, X-Fw,
 //                      X-Set-Orientation (landscape|portrait, when set on the frame),
 //                      X-Panel (7.3|13.3: the screen the firmware was built for)
-//        -> 200 packed image | 304 unchanged | 204 nothing uploaded yet
+//        -> 200 sealed packed image | 304 unchanged | 204 nothing uploaded yet
 //        Every reply carries X-Sleep-Minutes (when to check in next) and X-Orientation.
-//   POST (upload page) Authorization: Bearer <uploadKey or ADMIN_TOKEN>, multipart form:
-//        image   = packed 4bpp palette image for the frame's screen (7.3": 192,000 bytes, 13.3": 960,000)
+//   POST (upload page) Authorization: Bearer <token derived from the frame code>, multipart form,
+//        everything sealed in the browser (web/seal.js), so the server can't see any of it:
+//        image   = packed 4bpp palette image for the frame's screen (7.3": 192,000 bytes, 13.3": 960,000) + 28
 //        preview = PNG of what the frame will show (for the upload page)
-//        from    = optional sender name
+//        from    = optional sender name (sealed text)
 //        album   = optional folder id
 //        original, edits = the photo and editor settings, so it can be edited again later
 //        queue   = "next" (default): goes up at the frame's next check-in
 //                  "rotation": just joins the rotation (for bulk imports)
 
 import {
-  frames, images, status, loadFrame, keyMatches, canManage, json,
+  frames, images, status, loadFrame, keyMatches, canManage, json, sealedText, MAX_NAME_CHARS,
   now, newPictureId, updateState, loadState, deletePictureFiles, readPictureForm, storePicture,
 } from "../lib/common.mjs";
 import { choosePicture, nextWakeMinutes, addPicture, mergeSettings, fitsPanel } from "../lib/schedule.mjs";
@@ -116,7 +117,7 @@ async function upload(req, id, frame) {
 
   const pic = await storePicture(id, newPictureId(), parts, panel);
   pic.album = album;
-  pic.from = String(form.get("from") || "").trim().slice(0, 40) || null;
+  pic.from = sealedText(form.get("from"), MAX_NAME_CHARS);
 
   let removed = [];
   const saved = await updateState(id, (before) => {

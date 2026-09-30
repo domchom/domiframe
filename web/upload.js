@@ -2,23 +2,26 @@ import { sizeFor, toPanelOrder, panelOf, DEFAULTS, ditherToPalette, pack, indice
 import { ask, tell } from "./dialog.js";
 import { ago, until, batteryPct, LOW_BATTERY_PCT, rotateLabel, checkLabel, hourLabel } from "./format.js";
 import { rememberFrame, isFrameCode, normalizeCode } from "./code.js";
+import { frameKeys, seal, unseal, sealText, unsealText } from "./seal.js";
 
 const $ = (id) => document.getElementById(id);
 const frameId = (location.pathname.match(/^\/f\/([a-z0-9-]+)/) || [])[1];
 const storageKey = `domiframe:${frameId}`;
 
-// Friends' links carry the upload key in #k=. The admin page opens frames with #admin,
-// using the admin token it saved.
+// Links carry the frame code in #k= (a fragment, so it's never sent to the server). The code
+// stays in this browser: it's turned into an access token for the API and a key that seals
+// everything uploaded (web/seal.js), so the server only ever sees ciphertext.
 const hashParams = new URLSearchParams(location.hash.slice(1));
-const asAdmin = hashParams.has("admin");
 let uploadKey = hashParams.get("k");
 try {
-  if (asAdmin) uploadKey = localStorage.getItem("domiframe:admin");
-  else if (uploadKey) localStorage.setItem(storageKey, (uploadKey = normalizeCode(uploadKey)));
-  else uploadKey = localStorage.getItem(storageKey);
+  if (uploadKey) {
+    localStorage.setItem(storageKey, (uploadKey = normalizeCode(uploadKey)));
+    history.replaceState(null, "", location.pathname); // saved: keep the code out of the address bar
+  } else uploadKey = localStorage.getItem(storageKey);
 } catch { /* storage unavailable */ }
 
-const auth = { Authorization: `Bearer ${uploadKey}` };
+let auth = {};
+let contentKey = null; // CryptoKey for sealing and opening this frame's pictures and names
 let source = null; // ImageBitmap or canvas (after rotating)
 let packed = null;
 let dithered = null; // last dithered ImageData, restored after "compare"
@@ -42,26 +45,34 @@ function msg(text, kind = "") {
 const api = (path, init = {}) =>
   fetch(`/api/frames/${frameId}/${path}`, { ...init, headers: { ...auth, ...init.headers } });
 
+/**
+ * No frame code, or it doesn't open this frame (wrong code, a link from before frames made their
+ * own codes, or the frame has made a new code since). Nothing can be sent, so both pickers go.
+ */
+function cantOpen(forget = true) {
+  $("frame-status").textContent = "This frame's code is missing or no longer works. " +
+    "Hold KEY1 on the frame while pressing reset to see its code, then enter it under My frame on the home page.";
+  $("file").disabled = $("folder").disabled = true;
+  for (const p of document.querySelectorAll(".picker")) p.classList.add("off");
+  // So My frame asks for the code again (not on a server hiccup: the code may be fine)
+  if (forget) try { localStorage.removeItem(storageKey); } catch {}
+}
+
 async function loadInfo() {
-  if (!frameId || !uploadKey) {
-    $("frame-status").textContent = "This link is incomplete. Ask for a new one.";
-    $("file").disabled = true;
-    return;
+  if (frameId && isFrameCode(uploadKey) && !contentKey) {
+    const keys = await frameKeys(frameId, uploadKey);
+    auth = { Authorization: `Bearer ${keys.auth}` };
+    contentKey = keys.key;
   }
+  if (!frameId || !contentKey) return cantOpen();
   const res = await api("info");
-  if (!res.ok) {
-    $("frame-status").textContent = "This link doesn't work. Ask for a new one.";
-    $("file").disabled = true;
-    return;
-  }
-  const info = await res.json();
-  if (!asAdmin) {
-    rememberFrame(frameId, info.name);
-    // Friends with a frame code can open this frame anywhere from the home page
-    $("device-access").hidden = !isFrameCode(uploadKey);
-    $("access-id").textContent = frameId;
-    $("access-code").textContent = uploadKey;
-  }
+  if (!res.ok) return cantOpen(res.status === 404);
+  const info = await openInfo(await res.json());
+  rememberFrame(frameId, info.name);
+  // Friends with the frame code can open this frame anywhere from the home page
+  $("device-access").hidden = false;
+  $("access-id").textContent = frameId;
+  $("access-code").textContent = uploadKey;
   $("frame-name").textContent = info.name || "Your frame";
   document.title = `${info.name || "Frame"} · DomiFrame`;
 
@@ -85,13 +96,44 @@ async function loadInfo() {
   if (photos.length > 1) showBatchNote();
 }
 
+/** Open the sealed parts of the frame's info: sender names, folder names, edit settings. */
+async function openInfo(info) {
+  const opened = new Map(); // the same names repeat a lot
+  const text = (s) => {
+    if (!s) return null;
+    if (!opened.has(s)) opened.set(s, unsealText(contentKey, s));
+    return opened.get(s);
+  };
+  await Promise.all([
+    ...info.albums.map(async (a) => (a.name = (await text(a.name)) ?? "(unreadable)")),
+    ...info.pictures.map(async (p) => {
+      p.from = await text(p.from);
+      const edits = await text(p.edits);
+      try { p.edits = edits ? JSON.parse(edits) : null; } catch { p.edits = null; }
+    }),
+  ]);
+  return info;
+}
+
+/** A sealed file from the API, opened. Null if it's missing or can't be opened. */
+async function openFile(path, type) {
+  const r = await api(path);
+  if (!r.ok) return null;
+  try {
+    return new Blob([await unseal(contentKey, await r.arrayBuffer())], { type });
+  } catch {
+    return null;
+  }
+}
+
 // Blob URLs for pictures, kept across refreshes (ids never change, and the browser caches the
 // files too). The grid uses small thumbnails; the picture on the frame, the full preview.
 const thumbs = new Map();
 function thumb(picId, full = false) {
   const path = full ? `pictures/${picId}` : `pictures/${picId}/thumb`;
   if (!thumbs.has(path)) {
-    thumbs.set(path, api(path).then(async (r) => (r.ok ? URL.createObjectURL(await r.blob()) : "")));
+    // A thumbnail is a JPEG, or the PNG preview for older pictures: the browser can tell
+    thumbs.set(path, openFile(path, full ? "image/png" : "").then((b) => (b ? URL.createObjectURL(b) : "")));
   }
   return thumbs.get(path);
 }
@@ -278,7 +320,7 @@ async function act(res, okMsg) {
 async function newFolder() {
   const name = await ask({ title: "New folder", input: { placeholder: "e.g. Summer 2026" }, ok: "Create folder" });
   if (!name) return null;
-  const r = await api("albums", jsonReq("POST", { name }));
+  const r = await api("albums", jsonReq("POST", { name: await sealText(contentKey, name.slice(0, 40)) }));
   if (!r.ok) {
     await tell("Couldn't create the folder", (await r.json().catch(() => ({}))).error || r.statusText);
     return null;
@@ -290,7 +332,7 @@ async function newFolder() {
 
 $("rename-folder").addEventListener("click", async () => {
   const name = await ask({ title: "Rename folder", input: { value: folderName(lib.view) }, ok: "Rename" });
-  if (name) act(api(`albums/${lib.view}`, jsonReq("PATCH", { name })));
+  if (name) act(api(`albums/${lib.view}`, jsonReq("PATCH", { name: await sealText(contentKey, name.slice(0, 40)) })));
 });
 $("delete-folder").addEventListener("click", async () => {
   const n = frameInfo.pictures.filter(inView).length;
@@ -896,9 +938,8 @@ async function editUploaded(ids) {
   msg(`Opening ${plural(editable.length, "picture")}…`);
   const loaded = [];
   for (const p of editable) {
-    const r = await api(`pictures/${p.id}/original`);
-    if (!r.ok) continue;
-    const blob = await r.blob();
+    const blob = await openFile(`pictures/${p.id}/original`, "image/jpeg");
+    if (!blob) continue;
     const e = p.edits || {};
     loaded.push({
       file: new File([blob], `${p.id}.jpg`, { type: "image/jpeg" }), thumb: null,
@@ -1175,23 +1216,28 @@ const toBlob = (canvas, type, quality) => new Promise((r) => canvas.toBlob(r, ty
 async function prepareUpload(queue = "next") {
   const p = photos[cur];
   const form = new FormData();
-  form.append("image", new Blob([packed], { type: "application/octet-stream" }), "image.bin");
+  // Everything is sealed here, before it leaves the browser (web/seal.js)
+  const sealed = async (blob) => blob && new Blob([await seal(contentKey, blob)], { type: "application/octet-stream" });
+  const image = packed.slice(); // the editor may re-dither while this seals
   // Big screens get a half-size preview, to keep uploads small
   const [preview, small, original] = await Promise.all([
     toBlob(scaledPreview(800), "image/png"),
     toBlob(scaledPreview(400), "image/jpeg", 0.85), // for the picture grid
     originalOf(p),
   ]);
-  form.append("preview", preview, "preview.png");
-  if (small) form.append("thumb", small, "thumb.jpg");
-  if (original) form.append("original", original, "original.jpg");
-  form.append("edits", JSON.stringify(editsOf(p)));
+  const edits = editsOf(p);
+  const [sImage, sPreview, sSmall, sOriginal] = await Promise.all([sealed(image), sealed(preview), sealed(small), sealed(original)]);
+  form.append("image", sImage, "image.bin");
+  form.append("preview", sPreview, "preview.bin");
+  if (sSmall) form.append("thumb", sSmall, "thumb.bin");
+  if (sOriginal) form.append("original", sOriginal, "original.bin");
+  form.append("edits", await sealText(contentKey, JSON.stringify(edits)));
   if (p.replaces) return { path: `pictures/${p.replaces}`, init: { method: "PUT", body: form } };
   form.append("queue", queue);
   const album = $("upload-album").value;
   if (album) form.append("album", album);
-  const from = $("from").value.trim();
-  if (from) form.append("from", from);
+  const from = $("from").value.trim().slice(0, 40);
+  if (from) form.append("from", await sealText(contentKey, from));
   return { path: "image", init: { method: "POST", body: form } };
 }
 

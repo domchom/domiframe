@@ -11,8 +11,18 @@
   to = "/upload.html"
   status = 200
 
+# Security headers for every page and API reply (scripts/local.mjs sends the same ones).
+# The CSP only lets pages run this site's own scripts, and talk only to this site: even if
+# something odd got into a page, it couldn't load code from elsewhere or send a frame code or
+# photo off to another server. The pages have no inline scripts or styles, so none are allowed.
 [[headers]]
   for = "/*"
   [headers.values]
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "no-referrer"
+    Content-Security-Policy = "default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; img-src 'self' blob: data:; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    Strict-Transport-Security = "max-age=63072000; includeSubDomains"
+    X-Frame-Options = "DENY"
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Resource-Policy = "same-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"

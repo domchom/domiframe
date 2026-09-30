@@ -7,7 +7,15 @@
 // (X-Sleep-Minutes), so check-in times, quiet hours and picture rotation are set on the server.
 //
 // First boot (or hold KEY3 while resetting): opens a Wi-Fi setup portal
-// "DomiFrame-Setup" where you enter the home Wi-Fi plus the frame ID and device key.
+// "DomiFrame-Setup" (password shown on the screen) where you enter the home Wi-Fi plus the
+// frame ID and device key.
+//
+// Frame code: the frame makes its own random code (like K7PX-92QD-M4TR-8WZN) and shows it on
+// its screen; people type it on the website to send pictures. Pictures are sealed in their
+// browser with a key derived from the code (web/seal.js), so the server only ever has
+// ciphertext; the frame derives the same key and opens them here. The server only gets the
+// SHA-256 of a separate access token derived from the code (POST /api/frames/<id>/code).
+// Hold KEY1 while pressing reset to show the code again; the setup portal can make a new one.
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -18,6 +26,10 @@
 #include <SPI.h>
 #include <esp_wifi.h>
 #include <driver/rtc_io.h>
+#include <esp_system.h>
+#include <mbedtls/md.h>
+#include <mbedtls/gcm.h>
+#include <mbedtls/base64.h>
 #include "config.h"
 
 // ---- Screen -----------------------------------------------------------------
@@ -45,6 +57,9 @@ GxEPD2_7C<GxEPD2_730c_GDEP073E01, GxEPD2_730c_GDEP073E01::HEIGHT / 4>
 #endif
 
 static const size_t IMAGE_BYTES = (size_t)W * H / 2;
+// Sealed download: IV (12) || ciphertext || GCM tag (16), see web/seal.js
+static const size_t GCM_IV_BYTES = 12, GCM_TAG_BYTES = 16;
+static const size_t SEALED_BYTES = GCM_IV_BYTES + IMAGE_BYTES + GCM_TAG_BYTES;
 
 #if VERIFY_TLS
 // Mozilla's root certificates (firmware/data/cert, made by tools/make_ca_bundle.py), so the
@@ -60,6 +75,8 @@ RTC_DATA_ATTR int32_t rtcChannel = 0;
 
 Preferences prefs;
 String frameId, deviceKey, etag;
+String frameCode;          // XXXX-XXXX-XXXX-XXXX, made here, never sent anywhere
+bool codePending = false;  // made but not yet registered with the server
 uint32_t sleepMinutes = SLEEP_MINUTES;  // replaced by the server's X-Sleep-Minutes
 // How the frame hangs: "landscape" or "portrait". Chosen in the setup portal (sent to the server
 // until it confirms), otherwise whatever the server says (set on the website). Pictures arrive
@@ -190,6 +207,8 @@ void loadSettings() {
   etag = prefs.getString("etag", "");
   orientation = prefs.getString("orient", "landscape");
   orientationPending = prefs.getBool("orientSet", false);
+  frameCode = prefs.getString("code", "");
+  codePending = prefs.getBool("codePend", false);
   prefs.end();
 }
 
@@ -206,13 +225,134 @@ void saveOrientationPending(bool pending) {
   prefs.end();
 }
 
+void saveCode(const String& code, bool pending) {
+  frameCode = code;
+  codePending = pending;
+  prefs.begin("domiframe", false);
+  prefs.putString("code", code);
+  prefs.putBool("codePend", pending);
+  prefs.end();
+}
+
+// ---- Frame code and sealed pictures ---------------------------------------------
+
+static const char CODE_ALPHABET[] = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";  // Crockford base32
+
+// n random characters from CODE_ALPHABET. The hardware RNG is truly random while the radio is
+// on, so frame codes are made once Wi-Fi is up.
+String randomChars(size_t n) {
+  uint8_t bytes[32];
+  esp_fill_random(bytes, n);
+  String out;
+  for (size_t i = 0; i < n; i++) out += CODE_ALPHABET[bytes[i] & 31];
+  memset(bytes, 0, sizeof bytes);
+  return out;
+}
+
+void newFrameCode() {
+  String c = randomChars(16);
+  saveCode(c.substring(0, 4) + "-" + c.substring(4, 8) + "-" + c.substring(8, 12) + "-" + c.substring(12), true);
+  etag = "";  // pictures sealed with the old code are gone
+  saveString("etag", etag);
+}
+
+void hmacSha256(const uint8_t* key, size_t keyLen, const uint8_t* msg, size_t len, uint8_t out[32]) {
+  mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), key, keyLen, msg, len, out);
+}
+
+// HKDF-SHA256 (RFC 5869) for one 32-byte block, as web/seal.js frameKeys:
+// input = the code without dashes, salt = "domiframe:<frame id>", info = "auth" or "content"
+void frameKey(const char* info, uint8_t out[32]) {
+  String ikm = frameCode;
+  ikm.replace("-", "");
+  String salt = "domiframe:" + frameId;
+  uint8_t prk[32], msg[16];
+  hmacSha256((const uint8_t*)salt.c_str(), salt.length(), (const uint8_t*)ikm.c_str(), ikm.length(), prk);
+  size_t n = strlen(info);
+  memcpy(msg, info, n);
+  msg[n] = 1;
+  hmacSha256(prk, sizeof prk, msg, n + 1, out);
+  memset(prk, 0, sizeof prk);
+}
+
+// SHA-256 (hex) of the access token browsers send: base64url of the "auth" key, unpadded
+String accessTokenHash() {
+  uint8_t auth[32], b64[48], digest[32];
+  size_t len = 0;
+  frameKey("auth", auth);
+  mbedtls_base64_encode(b64, sizeof b64, &len, auth, sizeof auth);
+  while (len && b64[len - 1] == '=') len--;
+  for (size_t i = 0; i < len; i++) {
+    if (b64[i] == '+') b64[i] = '-';
+    if (b64[i] == '/') b64[i] = '_';
+  }
+  mbedtls_md(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), b64, len, digest);
+  memset(auth, 0, sizeof auth);
+  char hex[65];
+  for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", digest[i]);
+  return String(hex);
+}
+
+// Opens a sealed picture into out (IMAGE_BYTES). False if it wasn't sealed with our code.
+bool unsealPicture(const uint8_t* sealed, uint8_t* out) {
+  uint8_t key[32];
+  frameKey("content", key);
+  mbedtls_gcm_context gcm;
+  mbedtls_gcm_init(&gcm);
+  int rc = mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key, 256);
+  if (rc == 0) {
+    rc = mbedtls_gcm_auth_decrypt(&gcm, IMAGE_BYTES, sealed, GCM_IV_BYTES, nullptr, 0,
+                                  sealed + GCM_IV_BYTES + IMAGE_BYTES, GCM_TAG_BYTES, sealed + GCM_IV_BYTES, out);
+  }
+  mbedtls_gcm_free(&gcm);
+  memset(key, 0, sizeof key);
+  return rc == 0;
+}
+
+void showCodeScreen() {
+  String line1 = "Frame ID: " + frameId;  // short lines: they fit a portrait 7.3" too
+  showMessage(frameCode.c_str(), line1.c_str(), "Use both at domiframe.art");
+  etag = "";  // the picture comes back at the next wake
+  saveString("etag", etag);
+}
+
+void secureClient(WiFiClientSecure& client) {
+#if VERIFY_TLS
+  client.setCACertBundle(CA_BUNDLE);
+#else
+  client.setInsecure();
+#endif
+}
+
+// Tell the server about a new code (only a hash of the token derived from it).
+// Returns the HTTP status, or <= 0 on a network error.
+int registerCode() {
+  WiFiClientSecure client;
+  secureClient(client);
+  HTTPClient http;
+  String url = String(SERVER_BASE) + "/api/frames/" + frameId + "/code";
+  if (!http.begin(client, url)) return -1;
+  http.setTimeout(20000);
+  http.addHeader("X-Device-Key", deviceKey);
+  http.addHeader("Content-Type", "application/json");
+  int code = http.POST("{\"hash\":\"" + accessTokenHash() + "\"}");
+  http.end();
+  Serial.printf("POST %s -> %d\n", url.c_str(), code);
+  if (code == 200) saveCode(frameCode, false);
+  return code;
+}
+
 bool runSetupPortal() {
-  showMessage("Wi-Fi setup", "On your phone, join the Wi-Fi",
-              "\"" SETUP_AP_NAME "\" to set me up.");
+  // A fresh password each time, shown only on the screen: nobody nearby can join the portal
+  // (and change where the frame connects) without seeing the frame.
+  String apPassword = randomChars(8);
+  String joinLine = "password " + apPassword + " to set me up.";
+  showMessage("Wi-Fi setup", "On your phone, join \"" SETUP_AP_NAME "\",", joinLine.c_str());
 
   WiFiManager wm;
   WiFiManagerParameter pId("id", "Frame ID", frameId.c_str(), 32);
-  WiFiManagerParameter pKey("key", "Device key", deviceKey.c_str(), 64);
+  // Never shown back: anyone who joins the portal could read it. Blank keeps the saved key.
+  WiFiManagerParameter pKey("key", deviceKey.isEmpty() ? "Device key" : "Device key (leave blank to keep it)", "", 64);
   // WiFiManager only has text fields: a hidden one holds the value, a dropdown fills it in.
   WiFiManagerParameter pOrient("orient", "", orientation.c_str(), 10, "type='hidden'");
   bool portrait = orientation == "portrait";
@@ -221,18 +361,32 @@ bool runSetupPortal() {
                            "<option value='landscape'") + (portrait ? "" : " selected") + ">Landscape (wide)</option>"
                            "<option value='portrait'" + (portrait ? " selected" : "") + ">Portrait (tall)</option></select>";
   WiFiManagerParameter pOrientPick(pickHtml.c_str());
+  WiFiManagerParameter pNewCode("newcode", "", "", 2, "type='hidden'");
+  WiFiManagerParameter pNewCodePick(
+      "<br><label><input type='checkbox' style='width:auto' "
+      "onchange=\"document.getElementById('newcode').value=this.checked?'1':''\"> "
+      "Make a new frame code. The old code stops working and all pictures are removed.</label>");
   wm.addParameter(&pId);
   wm.addParameter(&pKey);
   wm.addParameter(&pOrientPick);
   wm.addParameter(&pOrient);
+  if (!frameCode.isEmpty()) {
+    wm.addParameter(&pNewCodePick);
+    wm.addParameter(&pNewCode);
+  }
   wm.setConfigPortalTimeout(SETUP_PORTAL_TIMEOUT_S);
   wm.setBreakAfterConfig(true);
 
-  bool ok = wm.startConfigPortal(SETUP_AP_NAME);
-  if (strlen(pId.getValue())) {
-    frameId = pId.getValue();
+  bool ok = wm.startConfigPortal(SETUP_AP_NAME, apPassword.c_str());
+  String newId = pId.getValue();
+  newId.trim();
+  bool wantNewCode = String(pNewCode.getValue()) == "1";
+  if (newId.length() && newId != frameId) {
+    frameId = newId;
     saveString("id", frameId);
+    wantNewCode = true;  // the code's keys are tied to the frame ID
   }
+  if (wantNewCode) saveCode("", false);  // made (and registered) once we're online
   if (strlen(pKey.getValue())) {
     deviceKey = pKey.getValue();
     saveString("key", deviceKey);
@@ -289,11 +443,7 @@ bool connectWifi() {
 // Returns true if a new picture was drawn.
 bool fetchAndDraw(int batteryMv) {
   WiFiClientSecure client;
-#if VERIFY_TLS
-  client.setCACertBundle(CA_BUNDLE);
-#else
-  client.setInsecure();
-#endif
+  secureClient(client);
 
   HTTPClient http;
   String url = String(SERVER_BASE) + "/api/frames/" + frameId + "/image";
@@ -334,15 +484,20 @@ bool fetchAndDraw(int batteryMv) {
   }
 
   int len = http.getSize();  // -1 if the response is chunked
-  if (len != -1 && len != (int)IMAGE_BYTES) {
+  if (len != -1 && len != (int)SEALED_BYTES) {
     Serial.printf("unexpected size %d\n", len);
     http.end();
     return false;
   }
 
-  uint8_t* buf = (uint8_t*)ps_malloc(IMAGE_BYTES);
-  if (!buf) buf = (uint8_t*)malloc(IMAGE_BYTES);
+  auto alloc = [](size_t n) {
+    uint8_t* p = (uint8_t*)ps_malloc(n);
+    return p ? p : (uint8_t*)malloc(n);
+  };
+  uint8_t* sealed = alloc(SEALED_BYTES);
+  uint8_t* buf = sealed ? alloc(IMAGE_BYTES) : nullptr;
   if (!buf) {
+    free(sealed);
     http.end();
     return false;
   }
@@ -350,8 +505,8 @@ bool fetchAndDraw(int batteryMv) {
   WiFiClient* stream = http.getStreamPtr();
   size_t got = 0;
   uint32_t last = millis();
-  while (got < IMAGE_BYTES && millis() - last < 15000) {
-    int n = stream->read(buf + got, IMAGE_BYTES - got);
+  while (got < SEALED_BYTES && millis() - last < 15000) {
+    int n = stream->read(sealed + got, SEALED_BYTES - got);
     if (n > 0) {
       got += n;
       last = millis();
@@ -362,8 +517,11 @@ bool fetchAndDraw(int batteryMv) {
   String newEtag = http.header("ETag");
   http.end();
 
-  if (got != IMAGE_BYTES) {
-    Serial.printf("short read %u\n", (unsigned)got);
+  bool opened = got == SEALED_BYTES && unsealPicture(sealed, buf);
+  free(sealed);
+  if (!opened) {
+    // Short read, or not sealed with our code (e.g. uploaded just before a new code)
+    Serial.printf(got == SEALED_BYTES ? "couldn't open the picture\n" : "short read %u\n", (unsigned)got);
     free(buf);
     return false;
   }
@@ -403,6 +561,8 @@ void setup() {
 
   loadSettings();
   bool wantSetup = frameId.isEmpty() || deviceKey.isEmpty() || digitalRead(BTN_SETUP) == LOW;
+  // KEY1 held while pressing reset (not a KEY1 wake from sleep): show the frame code again
+  bool wantCode = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED && digitalRead(BTN_REFRESH) == LOW;
 
   bool online = wantSetup ? runSetupPortal() : connectWifi();
   if (!online) {
@@ -414,10 +574,20 @@ void setup() {
   int mv = readBatteryMv();
   Serial.printf("frame=%s battery=%dmV etag=%s\n", frameId.c_str(), mv, etag.c_str());
 
-  bool drew = fetchAndDraw(mv);
-  if (!drew && wantSetup) {
-    showMessage("Connected!", "Send a picture from your upload link.");
+  if (frameCode.isEmpty()) newFrameCode();  // first setup, or asked for in the portal
+  if (codePending) {
+    int code = registerCode();
+    if (code == 200) showCodeScreen();
+    else if (code == 401 || code == 404) showMessage("Frame not registered", "Hold KEY3 and press reset", "to re-enter the frame ID and key.");
+    goToSleep();  // on a network error, try again next wake (pictures can't arrive before)
   }
+  if (wantCode) {
+    showCodeScreen();
+    goToSleep();
+  }
+
+  bool drew = fetchAndDraw(mv);
+  if (!drew && wantSetup) showCodeScreen();  // what someone needs to send the first picture
   goToSleep();
 }
 

@@ -10,7 +10,6 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/style.css">
   <script type="module" src="/brand.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" defer></script>
 </head>
 <body>
   <main class="wrap admin">
@@ -22,7 +21,7 @@
 
     <section class="card" id="signin">
       <h2>Sign in</h2>
-      <p class="muted small">Enter the <code>ADMIN_TOKEN</code> from your Netlify environment variables. It's saved in this browser only.</p>
+      <p class="muted small">Enter the <code>ADMIN_TOKEN</code> from your Netlify environment variables. It's kept in this tab only, until you close it.</p>
       <form id="signin-form" class="stack">
         <input type="password" id="token" class="text" autocomplete="current-password" placeholder="Admin token" required>
         <button class="primary">Sign in</button>

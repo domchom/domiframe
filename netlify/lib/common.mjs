@@ -2,20 +2,33 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { getStore } from "@netlify/blobs";
 import { emptyState, normalizeState, DEFAULT_SETTINGS } from "./schedule.mjs";
 import { imageBytes } from "../../web/dither.js";
+import { SEAL_OVERHEAD } from "../../web/seal.js";
 
+// Everything people upload is encrypted in their browser with a key only they and the frame
+// have (web/seal.js): pictures, sender names, folder names and edit settings. The server stores
+// and passes on ciphertext, and can't check or read what's inside.
+//
 // Picture size depends on the frame's screen (web/dither.js PANELS): 4 bits per pixel,
-// two pixels per byte, high nibble first. 7.3" = 192,000 bytes, 13.3" = 960,000 bytes.
-export { imageBytes };
+// two pixels per byte, high nibble first. 7.3" = 192,000 bytes, 13.3" = 960,000 bytes,
+// plus SEAL_OVERHEAD once encrypted.
+export const sealedImageBytes = (panel) => imageBytes(panel) + SEAL_OVERHEAD;
 export const MAX_PREVIEW_BYTES = 3 * 1024 * 1024;
 export const MAX_ORIGINAL_BYTES = 4 * 1024 * 1024; // the photo as uploaded (JPEG, ~2000 px), for editing later
 export const MAX_THUMB_BYTES = 256 * 1024; // small JPEG for the picture grid
-export const MAX_EDITS_BYTES = 4096;
+export const MAX_EDITS_CHARS = 8192;
+export const MAX_NAME_CHARS = 400; // a sealed name of up to 40 characters, with room to spare
+
+/** A sealed text field (web/seal.js sealText): base64url of at least IV + tag + 1 byte. */
+export function sealedText(value, max) {
+  const s = typeof value === "string" ? value : "";
+  return s.length >= 39 && s.length <= max && /^[A-Za-z0-9_-]+$/.test(s) ? s : null;
+}
 
 export const FRAME_ID_RE = /^[a-z0-9][a-z0-9-]{1,31}$/;
 
 const store = (name) => getStore({ name, consistency: "strong" });
 export const frames = () => store("frames"); // <id> -> { name, uploadKeyHash, deviceKeyHash, createdAt, settings }
-export const images = () => store("images"); // <id>/<picId>.bin (frame), .png (preview), .jpg (original), .thumb (grid)
+export const images = () => store("images"); // <id>/<picId>.bin (frame), .png (preview), .jpg (original), .thumb (grid), all sealed
 export const status = () => store("status"); // <id> -> { lastSeen, batteryMv, fw, sleepMinutes }
 export const states = () => store("state"); // <id> -> picture queue, see lib/schedule.mjs
 
@@ -86,12 +99,10 @@ export async function deletePictureFiles(id, picIds) {
 
 export const newKey = () => randomBytes(24).toString("base64url");
 
-// Upload keys people can type: a "frame code" like K7PX-92QD-M4TR-8WZN. 16 characters of
-// Crockford base32 (no I, L, O or U, so nothing reads as another letter) = 80 random bits.
-// Pages normalize what's typed to this form (web/code.js); older 32-character keys still work.
-const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-export const newFrameCode = () =>
-  [...randomBytes(16)].map((b) => CODE_ALPHABET[b & 31]).join("").match(/.{4}/g).join("-");
+// The frame code (like K7PX-92QD-M4TR-8WZN) is made by the frame itself and never reaches the
+// server: browsers derive an access token from it (web/seal.js frameKeys) and the frame
+// registers that token's hash (POST /api/frames/:id/code). Only the hash is stored.
+export const HASH_RE = /^[0-9a-f]{64}$/;
 export const hashKey = (key) => createHash("sha256").update(String(key), "utf8").digest("hex");
 
 export function sameHash(a, b) {
@@ -122,9 +133,13 @@ export function keyMatches(frame, key, field) {
   return sameHash(hashKey(key), frame[field]);
 }
 
-/** Upload-link holders and the admin can view and manage a frame's pictures and settings. */
+/**
+ * Only people with the frame code can manage a frame's pictures. The admin can't: the pictures
+ * are sealed anyway, and keeping the admin token out of these routes means a leaked admin
+ * token can't delete or replace anyone's pictures either.
+ */
 export function canManage(req, frame) {
-  return keyMatches(frame, bearer(req), "uploadKeyHash") || isAdmin(req);
+  return keyMatches(frame, bearer(req), "uploadKeyHash");
 }
 
 export function isAdmin(req) {
@@ -134,7 +149,20 @@ export function isAdmin(req) {
   return sameHash(hashKey(token), hashKey(admin));
 }
 
-/** Everything the upload and admin pages show about a frame. */
+/** What the admin page shows: how the frame is doing, and counts, but nothing people uploaded. */
+export async function adminSummary(id, frame) {
+  const s = await frameSummary(id, frame);
+  return {
+    id, name: s.name, lastSeen: s.lastSeen, batteryMv: s.batteryMv, fw: s.fw, nextCheckIn: s.nextCheckIn,
+    settings: s.settings,
+    claimed: !!frame.codeClaimedAt, // the frame has made its code and registered it
+    pictures: s.pictures.length,
+    unseen: s.pictures.filter((p) => !p.seen).length,
+    albums: s.albums.length,
+  };
+}
+
+/** Everything the upload page shows about a frame (names and edits still sealed). */
 export async function frameSummary(id, frame) {
   const [s, state] = await Promise.all([status().get(id, { type: "json" }), loadState(id)]);
   const st = s || {};
@@ -159,34 +187,27 @@ export async function frameSummary(id, frame) {
 
 /**
  * Parse an uploaded picture (multipart form):
- *   image     packed 4bpp palette image, imageBytes(panel) long (required)
- *   preview   PNG of what the frame shows
- *   original  JPEG of the photo, so it can be edited again later
- *   thumb     small JPEG for the picture grid
- *   edits     JSON of the editor settings used
+ *   image     sealed packed 4bpp palette image, sealedImageBytes(panel) long (required)
+ *   preview   sealed PNG of what the frame shows
+ *   original  sealed JPEG of the photo, so it can be edited again later
+ *   thumb     sealed small JPEG for the picture grid
+ *   edits     sealed JSON of the editor settings used
  * Returns { parts } or { error }.
  */
 export async function readPictureForm(form, panel) {
-  const bytes = imageBytes(panel);
+  const bytes = sealedImageBytes(panel);
   const image = form.get("image");
   if (!(image instanceof Blob) || image.size !== bytes) {
-    return { error: `image must be exactly ${bytes} bytes for a ${panel || "7.3"}" screen` };
+    return { error: `image must be exactly ${bytes} bytes (sealed) for a ${panel || "7.3"}" screen` };
   }
   const bin = new Uint8Array(await image.arrayBuffer());
-  if (!validIndices(bin)) return { error: "invalid palette index" };
   const blobOf = (name, max) => {
     const b = form.get(name);
-    return b instanceof Blob && b.size > 0 && b.size <= max ? b : null;
+    return b instanceof Blob && b.size > SEAL_OVERHEAD && b.size <= max ? b : null;
   };
-  let edits = null;
   const rawEdits = form.get("edits");
-  if (typeof rawEdits === "string" && rawEdits.length <= MAX_EDITS_BYTES) {
-    try {
-      edits = JSON.parse(rawEdits);
-    } catch {
-      return { error: "edits must be JSON" };
-    }
-  }
+  const edits = rawEdits ? sealedText(rawEdits, MAX_EDITS_CHARS) : null;
+  if (rawEdits && !edits) return { error: "edits must be sealed" };
   return {
     parts: {
       bin,
@@ -197,19 +218,6 @@ export async function readPictureForm(form, panel) {
       edits,
     },
   };
-}
-
-/** Every nibble is a palette index 0-5. Checks 4 bytes at a time: this runs on ~1 MB for 13.3". */
-function validIndices(bin) {
-  const words = bin.byteLength % 4 === 0 && bin.byteOffset % 4 === 0
-    ? new Uint32Array(bin.buffer, bin.byteOffset, bin.byteLength / 4) : null;
-  if (!words) return bin.every((b) => (b >> 4) <= 5 && (b & 0x0f) <= 5);
-  // A nibble is > 5 when it's 6 or 7 (bit 2 and bit 1 set) or 8+ (bit 3 set).
-  for (let i = 0; i < words.length; i++) {
-    const w = words[i];
-    if ((w & 0x88888888) || ((w & 0x44444444) & ((w & 0x22222222) << 1))) return false;
-  }
-  return true;
 }
 
 /** Save a parsed picture's files; returns the picture record (without album/from). */

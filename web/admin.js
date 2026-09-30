@@ -2,11 +2,14 @@ import { ask, tell } from "./dialog.js";
 import { ago, until, batteryPct, LOW_BATTERY_PCT, rotateLabel } from "./format.js";
 
 const $ = (id) => document.getElementById(id);
-const TOKEN_KEY = "domiframe:admin"; // upload.js reads this for #admin links
-const isLocal = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname) || location.hostname.endsWith(".local");
+// Kept for this tab only: closing it signs out, so the token doesn't sit in the browser.
+const TOKEN_KEY = "domiframe:admin";
 
 let token = "";
-try { token = localStorage.getItem(TOKEN_KEY) || ""; } catch {}
+try {
+  localStorage.removeItem(TOKEN_KEY); // saved there by older versions
+  token = sessionStorage.getItem(TOKEN_KEY) || "";
+} catch {}
 
 const api = (path, init = {}) =>
   fetch(`/api/admin/frames${path}`, {
@@ -25,14 +28,14 @@ $("signin-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   token = $("token").value.trim();
   if (await load()) {
-    try { localStorage.setItem(TOKEN_KEY, token); } catch {}
+    try { sessionStorage.setItem(TOKEN_KEY, token); } catch {}
   } else {
     setMsg("signin-msg", "That token didn't work.", "err");
   }
 });
 
 $("signout").addEventListener("click", () => {
-  try { localStorage.removeItem(TOKEN_KEY); } catch {}
+  try { sessionStorage.removeItem(TOKEN_KEY); } catch {}
   token = "";
   $("app").hidden = true;
   $("signin").hidden = false;
@@ -67,7 +70,7 @@ function render(frames) {
     const pct = batteryPct(f.batteryMv);
     const low = pct != null && pct < LOW_BATTERY_PCT;
     const next = until(f.nextCheckIn);
-    const unseen = f.pictures.filter((p) => !p.seen).length;
+    const unseen = f.unseen;
 
     const head = el("div", "frame-head");
     head.append(el("strong", "", f.name), el("span", "muted small", f.id));
@@ -79,26 +82,22 @@ function render(frames) {
       f.lastSeen ? `Checked in ${ago(f.lastSeen)}` : "Never checked in",
       next && `next ${next}`,
       f.fw && `fw ${f.fw}`,
+      f.claimed ? "has its frame code" : "waiting for the frame to make its code",
     ].filter(Boolean).join(" · ");
     const hang = f.settings.orientation || "landscape";
     const pics = el("p", "muted small", `${f.settings.panel || "7.3"}" screen · hangs ${hang} · ` +
-      `${f.pictures.length} picture${f.pictures.length === 1 ? "" : "s"}` +
+      `${f.pictures} picture${f.pictures === 1 ? "" : "s"}` +
       (unseen ? ` (${unseen} new)` : "") +
-      (f.settings.album ? ` · shows “${f.albums.find((a) => a.id === f.settings.album)?.name}”` : "") +
-      (f.albums.length ? ` · ${f.albums.length} folder${f.albums.length === 1 ? "" : "s"}` : "") +
+      (f.albums ? ` · ${f.albums} folder${f.albums === 1 ? "" : "s"}` : "") +
       ` · changes ${rotateLabel(f.settings.rotateHours)}` + (f.settings.order === "shuffle" ? ", shuffled" : "") +
       (f.settings.quiet ? ` · sleeps ${f.settings.quietStart}:00–${f.settings.quietEnd}:00` : ""));
 
+    // No way in to the pictures from here: they're sealed with the frame's code, which only
+    // the frame and the people it's shared with have.
     const actions = el("div", "chips");
-    const open = el("a", "chip", "Open");
-    open.href = `/f/${f.id}#admin`;
-    open.target = "_blank";
-    open.rel = "noopener";
     actions.append(
-      open,
       button(hang === "portrait" ? "Turn to landscape" : "Turn to portrait", () => turn(f, hang === "portrait" ? "landscape" : "portrait")),
-      button("New upload link", () => newKey(f, "upload")),
-      button("New device key", () => newKey(f, "device")),
+      button("New device key", () => newKey(f)),
       button("Delete", () => remove(f), "danger"),
     );
     li.append(head, lines, pics, actions);
@@ -124,25 +123,19 @@ $("refresh").addEventListener("click", load);
 
 // ---- actions ---------------------------------------------------------------
 
-async function newKey(f, which) {
-  const warning = which === "upload"
-    ? `Make a new upload link for "${f.name}"? The old link will stop working.`
-    : `Make a new device key for "${f.name}"? The frame stops updating until you enter the new key in its setup portal (hold KEY3 and press reset).`;
-  if (!(await ask({ title: which === "upload" ? "New upload link?" : "New device key?", message: warning, ok: "Replace key", danger: true }))) return;
-  const res = await api(`/${f.id}/keys`, { method: "POST", body: JSON.stringify({ key: which }) });
+async function newKey(f) {
+  const warning = `Make a new device key for "${f.name}"? The frame stops updating until you enter the new key in its setup portal (hold KEY3 and press reset). Its frame code and pictures stay as they are.`;
+  if (!(await ask({ title: "New device key?", message: warning, ok: "Replace key", danger: true }))) return;
+  const res = await api(`/${f.id}/keys`, { method: "POST", body: JSON.stringify({ key: "device" }) });
   const data = await res.json();
   if (!res.ok) return tell("That didn't work", data.error || res.statusText);
-  showResult(f.id, data, which === "upload" ? "New upload link" : "New device key");
+  showResult(f.id, data, "New device key");
   load();
 }
 
 /** Change how a frame hangs. New pictures are made for it; existing ones can be rebuilt on its page. */
 async function turn(f, orientation) {
-  const res = await fetch(`/api/frames/${f.id}/settings`, {
-    method: "PUT",
-    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ orientation }),
-  });
+  const res = await api(`/${f.id}/settings`, { method: "PUT", body: JSON.stringify({ orientation }) });
   if (!res.ok) return tell("That didn't work", (await res.json().catch(() => ({}))).error || res.statusText);
   load();
 }
@@ -185,28 +178,18 @@ $("create-form").addEventListener("submit", async (e) => {
 
 function showResult(id, data, title) {
   $("result-title").textContent = title;
-  $("result-note").textContent = "Keys are shown only this once. Copy them now.";
+  $("result-note").textContent = "The device key is shown only this once. Copy it now. " +
+    "Once the frame is set up it makes its own frame code and shows it on its screen: that code, not anything here, is what opens the frame on the website.";
   const body = $("result-body");
   body.replaceChildren();
-  if (data.uploadLink) {
-    body.append(field("Upload link: send this to your friend", data.uploadLink));
-    const qr = qrSvg(data.uploadLink);
-    if (qr) body.append(qr);
-    if (data.uploadKey) {
-      // Or, to type in on the home page (My frame): e.g. on a card in the box
-      body.append(field("Frame ID and code: for “My frame” on the home page", `${id}  ·  ${data.uploadKey}`));
-    }
-  }
-  if (data.deviceKey) {
-    body.append(field("Frame ID: enter in the frame's setup portal", id));
-    body.append(field("Device key: enter in the frame's setup portal", data.deviceKey));
-    if (isLocal) {
-      const a = el("a", "chip", "Open virtual frame");
-      a.href = `/sim.html#id=${id}&key=${encodeURIComponent(data.deviceKey)}`;
-      a.target = "_blank";
-      body.append(a);
-    }
-  }
+  body.append(field("Frame ID: enter in the frame's setup portal", id));
+  body.append(field("Device key: enter in the frame's setup portal", data.deviceKey));
+  // No hardware yet? The virtual frame does what the real one does, in a browser tab
+  const a = el("a", "chip", "Open as a virtual frame");
+  a.href = `/sim.html#id=${id}&key=${encodeURIComponent(data.deviceKey)}`;
+  a.target = "_blank";
+  a.rel = "noopener";
+  body.append(a);
   $("result").hidden = false;
   $("result").scrollIntoView({ behavior: "smooth" });
 }
@@ -231,17 +214,6 @@ function field(label, value) {
   row.append(input, copy);
   wrap.append(row);
   return wrap;
-}
-
-function qrSvg(text) {
-  if (typeof window.qrcode !== "function") return null; // CDN unavailable: the link is enough
-  const qr = window.qrcode(0, "M");
-  qr.addData(text);
-  qr.make();
-  const box = el("div", "qr");
-  box.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
-  box.append(el("p", "muted small", "Or scan this with their phone's camera."));
-  return box;
 }
 
 load();

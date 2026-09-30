@@ -1,5 +1,6 @@
 import { ditherToPalette, indicesToRGBA } from "./dither.js";
-import { normalizeCode, parseLink, frameLink, rememberedFrames, forgetFrame, savedKey } from "./code.js";
+import { normalizeCode, isFrameCode, parseLink, frameLink, rememberedFrames, forgetFrame, savedKey } from "./code.js";
+import { frameKeys } from "./seal.js";
 import { ask } from "./dialog.js";
 
 const $ = (id) => document.getElementById(id);
@@ -68,7 +69,7 @@ function msg(text, kind = "") {
 $("open-code").addEventListener("input", (e) => {
   const el = e.target;
   const clean = el.value.toUpperCase().replace(/[\s-]/g, "");
-  // Only frame codes (up to 16 letters and digits); a link or an older long key stays as typed
+  // Only frame codes (up to 16 letters and digits); a pasted link stays as typed
   if (!/^[0-9A-Z]{0,16}$/.test(clean)) return;
   const shown = clean.match(/.{1,4}/g)?.join("-") || "";
   if (shown !== el.value) el.value = shown;
@@ -91,13 +92,16 @@ $("open-form").addEventListener("submit", async (e) => {
   let key = normalizeCode($("open-code").value);
   const link = parseLink($("open-id").value) || parseLink($("open-code").value);
   if (link) ({ id, key } = link);
+  key = normalizeCode(key);
   if (!id || !key) return msg("Enter both the frame ID and its code.", "err");
+  if (!isFrameCode(key)) return msg("A frame code is 16 letters and numbers, like K7PX-92QD-M4TR-8WZN.", "err");
   if (!/^[a-z0-9][a-z0-9-]{1,31}$/.test(id)) return msg("A frame ID is lowercase letters, numbers and dashes, like emma or gran-kitchen.", "err");
 
   $("open-go").disabled = true;
   msg("Checking…");
   try {
-    const res = await fetch(`/api/frames/${id}/info`, { headers: { Authorization: `Bearer ${key}` } });
+    const { auth } = await frameKeys(id, key); // the code itself stays in this browser
+    const res = await fetch(`/api/frames/${id}/info`, { headers: { Authorization: `Bearer ${auth}` } });
     if (res.ok) {
       location.href = frameLink(id, key); // the frame page saves it for next time
       return;

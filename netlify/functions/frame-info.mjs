@@ -1,4 +1,6 @@
-// For the upload page and admin page. Auth: Authorization: Bearer <uploadKey or ADMIN_TOKEN>
+// For the upload page. Auth: Authorization: Bearer <token derived from the frame code (web/seal.js)>
+// Picture files, sender names, folder names and edits are sealed in the browser: they come back
+// exactly as sent, and only someone with the frame code can open them.
 //   GET    /api/frames/:id/info                     -> name, check-ins, battery, settings, folders, pictures
 //   GET    /api/frames/:id/preview                  -> PNG of the picture on the frame now
 //   PUT    /api/frames/:id/settings                 -> { rotateHours, checkMinutes, album, order, quiet, quietStart, quietEnd, tz }
@@ -12,13 +14,13 @@
 //   DELETE /api/frames/:id/pictures  {ids} | {album} | {all: true}  -> remove several
 //   PATCH  /api/frames/:id/pictures  {ids, album}   -> move to a folder (album null = no folder)
 //
-//   POST   /api/frames/:id/albums  {name}           -> new folder
+//   POST   /api/frames/:id/albums  {name}           -> new folder (name sealed)
 //   PATCH  /api/frames/:id/albums/:album  {name}    -> rename
 //   DELETE /api/frames/:id/albums/:album?pictures=delete|keep
 
 import {
   frames, images, loadFrame, canManage, json, loadState, updateState, deletePictureFiles, frameSummary,
-  readPictureForm, storePicture, newPictureId, newAlbumId, PIC_ID_RE, now,
+  readPictureForm, storePicture, newPictureId, newAlbumId, PIC_ID_RE, now, sealedText, MAX_NAME_CHARS,
 } from "../lib/common.mjs";
 import {
   mergeSettings, removePictures, replacePicture, movePictures, addAlbum, renameAlbum, deleteAlbum,
@@ -80,14 +82,14 @@ export default async (req, context) => {
     }
 
     case "POST albums": {
-      const name = String((await body_(req)).name || "").trim().slice(0, 40);
-      if (!name) return json({ error: "name required" }, 400);
+      const name = sealedText((await body_(req)).name, MAX_NAME_CHARS);
+      if (!name) return json({ error: "name required (sealed)" }, 400);
       const album = { id: newAlbumId(), name, createdAt: new Date(now()).toISOString() };
       return change(id, (s) => (s.albums.length < MAX_ALBUMS ? addAlbum(s, album) : null), { album });
     }
     case "PATCH albums :item": {
-      const name = String((await body_(req)).name || "").trim().slice(0, 40);
-      if (!name) return json({ error: "name required" }, 400);
+      const name = sealedText((await body_(req)).name, MAX_NAME_CHARS);
+      if (!name) return json({ error: "name required (sealed)" }, 400);
       return change(id, (s) => (hasAlbum(s, item) ? renameAlbum(s, item, name) : null));
     }
     case "DELETE albums :item": {
@@ -132,12 +134,16 @@ async function removeSome(id, pick) {
 // A picture's files never change (an edit makes a new id), so browsers can keep them.
 const IMMUTABLE = "private, max-age=31536000, immutable";
 
-/** A picture file, or a 404 (null for a missing thumbnail, so the caller can fall back). */
+/**
+ * A sealed picture file, or a 404 (null for a missing thumbnail, so the caller can fall back).
+ * Served as opaque bytes, and as a download if opened directly, never as something to render.
+ */
 async function file(id, picId, ext, cache = IMMUTABLE) {
   const data = picId && (await images().get(`${id}/${picId}.${ext}`, { type: "arrayBuffer" }));
   if (!data) return ext === "thumb" ? null : json({ error: "not found" }, 404);
-  const type = ext === "png" ? "image/png" : "image/jpeg";
-  return new Response(data, { headers: { "content-type": type, "cache-control": cache } });
+  return new Response(data, {
+    headers: { "content-type": "application/octet-stream", "content-disposition": "attachment", "cache-control": cache },
+  });
 }
 
 async function putSettings(req, id, frame) {

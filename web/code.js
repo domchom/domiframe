@@ -1,11 +1,12 @@
 // Frame codes and the frames this device has opened. Shared by the home and upload pages.
 
-// Crockford base32, as the server makes codes (netlify/lib/common.mjs newFrameCode)
+// Crockford base32, as the frame makes codes (firmware/src/main.cpp newFrameCode)
 const CODE_RE = /^[0-9A-HJKMNP-TV-Z]{16}$/;
 
 /**
- * What someone typed as a code -> the key to send. Frame codes are forgiving: any case, spaces
- * or dashes anywhere, and O/I/L read as 0/1/1. Anything else (an older long key) passes as is.
+ * What someone typed as a code -> the code in its usual form (XXXX-XXXX-XXXX-XXXX). Codes are
+ * forgiving: any case, spaces or dashes anywhere, and O/I/L read as 0/1/1. Anything else comes
+ * back as typed (and isFrameCode says no). The code itself never goes to the server; see seal.js.
  */
 export function normalizeCode(text) {
   const raw = String(text || "").trim();
