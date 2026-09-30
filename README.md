@@ -75,7 +75,7 @@ Nobody who runs the server (including you, the developer) can see what people se
 - The frame derives the same key (`frameKey` in `firmware/src/main.cpp`, mbedtls) and opens the picture before drawing it. The virtual frame does the same with WebCrypto.
 - The admin page creates frames and device keys, and shows battery, check-ins and picture counts. It never gets a frame code and can't open, replace or delete anyone's pictures.
 
-Codes can be typed: the home page's **My frame** tab takes a frame ID and code (or a pasted link) and remembers frames opened on that device. Codes are forgiving about case, spaces, dashes and O/I/L (`web/code.js`). In links the code travels in the `#fragment`, which browsers never send, and the upload page removes it from the address bar once saved.
+The frame's code screen also has a QR code of `https://domiframe.art/f/<id>#k=<code>` (drawn with ESP-IDF's built-in QR encoder), so a phone can open the frame straight away. Codes can also be typed: the home page's **My frame** tab takes a frame ID and code (or a pasted link) and remembers frames opened on that device. Codes are forgiving about case, spaces, dashes and O/I/L (`web/code.js`). In links the code travels in the `#fragment`, which browsers never send, and the upload page removes it from the address bar once saved.
 
 **New code:** in the frame's setup portal (hold KEY3 and press reset), tick *Make a new frame code*. The old code stops working, and the frame's pictures and folders are deleted, since they were sealed with the old code. Changing the frame ID also makes a new code. If you set a frame up before gifting it, have the new owner do this so only they have the code. **Show the code again:** hold KEY1 while pressing reset.
 
@@ -83,7 +83,7 @@ Codes can be typed: the home page's **My frame** tab takes a frame ID and code (
 
 ## Other protections
 
-- **Security headers** on every page and API reply (`netlify.toml`, also sent by `npm run local`): a strict Content-Security-Policy (only this site's own scripts, no inline code, requests only to this site, no framing), HSTS, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `Permissions-Policy`, `nosniff`, `no-referrer`. No third-party scripts.
+- **Security headers** on every page and API reply (`netlify.toml`, also sent by `npm run local`): a strict Content-Security-Policy (only this site's own scripts, no inline code, requests only to this site, no framing), HSTS, `X-Frame-Options: DENY`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, `Permissions-Policy`, `nosniff`, `no-referrer`. No third-party scripts: the virtual frame's QR library is a copy in `web/vendor/`.
 - **Keys:** device keys and access tokens are stored only as SHA-256 hashes and compared in constant time. The admin token is kept in the browser tab's `sessionStorage` (gone when the tab closes), and it works only on `/api/admin/*`.
 - **Setup portal:** the `DomiFrame-Setup` Wi-Fi has a new random password each time, shown on the frame's screen, so nobody nearby can join it without seeing the frame. The portal never shows the saved device key back.
 - **Frame to server:** TLS is checked against Mozilla's root CAs (below). Sealed pictures that don't open with the frame's key (tampered with, or sealed with an old code) are never drawn.
@@ -115,7 +115,7 @@ Save the response and enter `id` + `deviceKey` on the frame (below). The frame t
    - 7.3" on EE04: `cd firmware && pio run -e ee04 -t upload`
    - 13.3" on EE02: `cd firmware && pio run -e ee02-13in3 -t upload`
 3. On first boot the screen says **Wi-Fi setup** with a password. Join the `DomiFrame-Setup` Wi-Fi from a phone with that password, pick the home network, fill in **Frame ID** and **Device key**, and choose how the frame hangs (landscape or portrait). The orientation can also be changed later on the upload or admin page.
-4. The frame connects, makes its **frame code** and shows it with the frame ID. Enter both under **My frame** on domiframe.art to send pictures.
+4. The frame connects, makes its **frame code** and shows it with the frame ID and a **QR code**. Scan the QR code to open the frame's page with the code filled in, or enter the ID and code under **My frame** on domiframe.art.
 5. To redo setup later (new home Wi-Fi, or a new frame code), hold **KEY3** while pressing reset. Hold **KEY1** while pressing reset to show the code again.
 6. **KEY1** wakes the frame to check for a new picture immediately.
 

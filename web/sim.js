@@ -92,8 +92,11 @@ function showUploadLink(id) {
 }
 
 // The same words as the firmware's code screen
+// with a QR code that opens the frame's page with the code filled in (after the #, so it's
+// never sent to the server)
 const showCode = (id) =>
-  message(frameCode(id), `Frame ID: ${id}`, `Use both at ${location.host}`);
+  message(frameCode(id), `Frame ID: ${id}`, `Scan, or use both at ${location.host}`,
+    `${location.origin}/f/${id}#k=${frameCode(id)}`);
 
 const showMv = () => ($("mvText").textContent = `${$("mv").value} mV`);
 $("mv").addEventListener("input", showMv); showMv();
@@ -123,7 +126,8 @@ async function refresh(paint) {
 
 // Same layout as showMessage() in firmware/src/main.cpp (doubled on the 13.3"), drawn upright
 // however the frame hangs (rotation 1 when turned: the text's top is the panel's right edge)
-const message = (title, line1, line2) => refresh(() => {
+// qrText: also draw it as a QR code, placed as qrPlace() in the firmware does
+const message = (title, line1, line2, qrText) => refresh(() => {
   const m = document.createElement("canvas");
   m.width = turned() ? H : W;
   m.height = turned() ? W : H;
@@ -135,6 +139,17 @@ const message = (title, line1, line2) => refresh(() => {
   c.font = `${24 * k}px Helvetica, Arial, sans-serif`; c.fillText(line1, 40 * k, 190 * k);
   if (line2) c.fillText(line2, 40 * k, 230 * k);
   [3, 2, 5, 4].forEach((b, i) => { c.fillStyle = rgb(b); c.fillRect((40 + i * 60) * k, 400 * k, 60 * k, 12 * k); });
+  if (qrText && window.qrcode) {
+    const qr = window.qrcode(0, "M");
+    qr.addData(qrText);
+    qr.make();
+    const n = qr.getModuleCount(), mod = 5 * k, margin = 40 * k, side = (n + 8) * mod;
+    const wide = m.width > m.height;
+    const x0 = (wide ? m.width - margin - side : (m.width - side) / 2) + 4 * mod;
+    const y0 = (wide ? (m.height - side) / 2 : m.height - margin - side) + 4 * mod;
+    c.fillStyle = rgb(0);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.isDark(y, x)) c.fillRect(x0 + x * mod, y0 + y * mod, mod, mod);
+  }
   ctx.save();
   if (turned()) ctx.setTransform(0, 1, -1, 0, W, 0);
   ctx.drawImage(m, 0, 0);

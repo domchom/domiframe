@@ -30,6 +30,7 @@
 #include <mbedtls/md.h>
 #include <mbedtls/gcm.h>
 #include <mbedtls/base64.h>
+#include <qrcode.h>  // ESP-IDF's QR encoder
 #include "config.h"
 
 // ---- Screen -----------------------------------------------------------------
@@ -88,6 +89,46 @@ bool orientationPending = false;
 // (rotation 1, matching how the upload page turns pictures: web/dither.js toPanelOrder).
 bool turned() { return (orientation == "portrait") != NATIVE_PORTRAIT; }
 
+// ---- QR code ----------------------------------------------------------------
+// ESP-IDF hands the finished code to a callback, so it's copied out here for drawing.
+
+static const int QR_MAX = 57;  // version 10: plenty for a link with the frame ID and code
+static bool qrDots[QR_MAX][QR_MAX];
+static int qrSize = 0;
+
+static void captureQr(esp_qrcode_handle_t qr) {
+  qrSize = esp_qrcode_get_size(qr);
+  if (qrSize > QR_MAX) qrSize = 0;
+  for (int y = 0; y < qrSize; y++)
+    for (int x = 0; x < qrSize; x++) qrDots[y][x] = esp_qrcode_get_module(qr, x, y);
+}
+
+// Returns the QR code's size in modules (0 if it couldn't be made); modules are in qrDots.
+int makeQr(const char* text) {
+  esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
+  cfg.display_func = captureQr;
+  cfg.max_qrcode_version = 10;
+  cfg.qrcode_ecc_level = ESP_QRCODE_ECC_MED;
+  qrSize = 0;
+  if (esp_qrcode_generate(&cfg, text) != ESP_OK) qrSize = 0;
+  return qrSize;
+}
+
+// Where the QR code goes on a w x h screen (after rotation) with `margin` around it: to the
+// right of the text when the screen is wide, below the text and color bars when it's tall.
+void qrPlace(int w, int h, int module, int margin, int& x, int& y) {
+  int side = (qrSize + 8) * module;  // with the 4-module quiet zone all round
+  if (w > h) {
+    x = w - margin - side;
+    y = (h - side) / 2;
+  } else {
+    x = (w - side) / 2;
+    y = h - margin - side;
+  }
+  x += 4 * module;
+  y += 4 * module;
+}
+
 // ---------------------------------------------------------------------------
 
 void displayPower(bool on) {
@@ -98,7 +139,8 @@ void displayPower(bool on) {
 
 #if defined(DOMIFRAME_PANEL_13IN3)
 
-void showMessage(const char* title, const char* line1, const char* line2 = nullptr) {
+// qr: optional text to show as a QR code (made with makeQr first)
+void showMessage(const char* title, const char* line1, const char* line2 = nullptr, bool qr = false) {
   displayPower(true);
   epaper.begin();
   epaper.setRotation(turned() ? 1 : 0);
@@ -114,6 +156,14 @@ void showMessage(const char* title, const char* line1, const char* line2 = nullp
   if (line2) epaper.drawString(line2, 80, 400);
   const uint16_t bars[4] = {TFT_RED, TFT_YELLOW, TFT_GREEN, TFT_BLUE};
   for (int i = 0; i < 4; i++) epaper.fillRect(80 + i * 120, 800, 120, 24, bars[i]);
+  if (qr && qrSize) {
+    const int m = 10;
+    int qx, qy;
+    qrPlace(epaper.width(), epaper.height(), m, 80, qx, qy);
+    for (int y = 0; y < qrSize; y++)
+      for (int x = 0; x < qrSize; x++)
+        if (qrDots[y][x]) epaper.fillRect(qx + x * m, qy + y * m, m, m, TFT_BLACK);
+  }
   epaper.update();
   epaper.sleep();
 }
@@ -142,7 +192,8 @@ void displayBegin() {
   display.setRotation(0);
 }
 
-void showMessage(const char* title, const char* line1, const char* line2 = nullptr) {
+// qr: draw the QR code made by makeQr as well
+void showMessage(const char* title, const char* line1, const char* line2 = nullptr, bool qr = false) {
   displayBegin();
   display.setFullWindow();
   display.firstPage();
@@ -164,6 +215,14 @@ void showMessage(const char* title, const char* line1, const char* line2 = nullp
     display.fillRect(100, 400, 60, 12, GxEPD_YELLOW);
     display.fillRect(160, 400, 60, 12, GxEPD_GREEN);
     display.fillRect(220, 400, 60, 12, GxEPD_BLUE);
+    if (qr && qrSize) {
+      const int m = 5;
+      int qx, qy;
+      qrPlace(display.width(), display.height(), m, 40, qx, qy);
+      for (int y = 0; y < qrSize; y++)
+        for (int x = 0; x < qrSize; x++)
+          if (qrDots[y][x]) display.fillRect(qx + x * m, qy + y * m, m, m, GxEPD_BLACK);
+    }
   } while (display.nextPage());
   display.hibernate();
 }
@@ -311,7 +370,11 @@ bool unsealPicture(const uint8_t* sealed, uint8_t* out) {
 
 void showCodeScreen() {
   String line1 = "Frame ID: " + frameId;  // short lines: they fit a portrait 7.3" too
-  showMessage(frameCode.c_str(), line1.c_str(), "Use both at domiframe.art");
+  // The QR code opens the frame's page with the code filled in. It's after the #, which
+  // browsers never send to the server.
+  String link = String(SERVER_BASE) + "/f/" + frameId + "#k=" + frameCode;
+  bool qr = makeQr(link.c_str()) > 0;
+  showMessage(frameCode.c_str(), line1.c_str(), qr ? "Scan, or use both at domiframe.art" : "Use both at domiframe.art", qr);
   etag = "";  // the picture comes back at the next wake
   saveString("etag", etag);
 }

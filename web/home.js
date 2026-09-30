@@ -114,50 +114,21 @@ $("open-form").addEventListener("submit", async (e) => {
   }
 });
 
-// ---- The example picture: a little scene, dithered like a real upload ----------------
+// ---- The example picture: a real photo, dithered here like an upload ------------------
 
-function drawSample() {
+async function drawSample() {
   const c = $("sample");
   const w = c.width, h = c.height;
+  const photo = new Image();
+  photo.src = "/sample.jpg"; // 800×480, the frame's shape
+  try {
+    await photo.decode();
+  } catch {
+    return; // the page works without it
+  }
   const ctx = c.getContext("2d", { willReadFrequently: true });
-  const sky = ctx.createLinearGradient(0, 0, 0, h * 0.7);
-  sky.addColorStop(0, "#3d6fb8");
-  sky.addColorStop(0.55, "#e9a06a");
-  sky.addColorStop(1, "#f6d98a");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, w, h);
-  const sun = ctx.createRadialGradient(w * 0.68, h * 0.52, 4, w * 0.68, h * 0.52, 46);
-  sun.addColorStop(0, "#fff6c8");
-  sun.addColorStop(0.45, "#ffd23a");
-  sun.addColorStop(1, "rgba(255,160,60,0)");
-  ctx.fillStyle = sun;
-  ctx.fillRect(0, 0, w, h);
-  // hills, far to near
-  const hill = (y0, amp, freq, phase, top, bottom) => {
-    const g = ctx.createLinearGradient(0, y0 - amp, 0, h);
-    g.addColorStop(0, top);
-    g.addColorStop(1, bottom);
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.moveTo(0, h);
-    for (let x = 0; x <= w; x += 4) ctx.lineTo(x, y0 + Math.sin(x * freq + phase) * amp + Math.sin(x * freq * 2.7) * amp * 0.3);
-    ctx.lineTo(w, h);
-    ctx.fill();
-  };
-  hill(h * 0.62, 10, 0.018, 1, "#7d7aa8", "#5a5f86");
-  hill(h * 0.72, 12, 0.012, 3, "#4f8a4a", "#2e5a2c");
-  hill(h * 0.85, 8, 0.02, 0.5, "#2f6b33", "#1b3a1d");
-  // a red barn
-  ctx.fillStyle = "#b2231c";
-  ctx.fillRect(w * 0.18, h * 0.66, 46, 30);
-  ctx.beginPath();
-  ctx.moveTo(w * 0.18 - 4, h * 0.66);
-  ctx.lineTo(w * 0.18 + 23, h * 0.66 - 16);
-  ctx.lineTo(w * 0.18 + 50, h * 0.66);
-  ctx.fill();
-  ctx.fillStyle = "#f2efe6";
-  ctx.fillRect(w * 0.18 + 17, h * 0.66 + 12, 12, 18);
-
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(photo, 0, 0, w, h);
   const img = ctx.getImageData(0, 0, w, h);
   const idx = ditherToPalette(img.data, w, h, { saturation: 1.3, contrast: 1.1 });
   ctx.putImageData(new ImageData(indicesToRGBA(idx), w, h), 0, 0);
