@@ -2,7 +2,7 @@
 
 // ---- Server ---------------------------------------------------------------
 #define SERVER_BASE "https://domiframe.com"
-#define FW_VERSION "0.3.0"
+#define FW_VERSION "0.4.0"
 
 // How often the frame wakes to check for a new picture when the server doesn't say
 // (offline, or an old server). Normally the server sends X-Sleep-Minutes, set per frame on

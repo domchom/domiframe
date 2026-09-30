@@ -1,4 +1,6 @@
-// DomiFrame firmware for XIAO ePaper Display Board EE04 + 7.3" E Ink Spectra 6 (800x480).
+// DomiFrame firmware for Seeed's XIAO ePaper Display Boards:
+//   env ee04        EE04 + 7.3" E Ink Spectra 6 (800x480), GxEPD2
+//   env ee02-13in3  EE02 + 13.3" E Ink Spectra 6 (1200x1600), Seeed_GFX
 //
 // Each wake: connect to Wi-Fi -> GET /api/frames/<id>/image (with ETag) ->
 // redraw only if the picture changed -> deep sleep for as long as the server says
@@ -14,21 +16,34 @@
 #include <WiFiClientSecure.h>
 #include <Preferences.h>
 #include <SPI.h>
-#include <GxEPD2_7C.h>
-#include <Fonts/FreeSansBold18pt7b.h>
-#include <Fonts/FreeSans12pt7b.h>
 #include <driver/rtc_io.h>
 #include "config.h"
 
+// ---- Screen -----------------------------------------------------------------
+// W x H is the panel's own pixel layout, which is the order the server sends pictures in.
+// Palette index order must match web/dither.js: black, white, yellow, red, blue, green.
+
+#if defined(DOMIFRAME_PANEL_13IN3)
+#include <TFT_eSPI.h>  // Seeed_GFX, configured by BOARD_SCREEN_COMBO=510 in platformio.ini
+#define PANEL_ID "13.3"
+static const int W = 1200, H = 1600;
+static const bool NATIVE_PORTRAIT = true;
+static const uint16_t PALETTE[6] = {TFT_BLACK, TFT_WHITE, TFT_YELLOW, TFT_RED, TFT_BLUE, TFT_GREEN};
+EPaper epaper;
+#else
+#include <GxEPD2_7C.h>
+#include <Fonts/FreeSansBold18pt7b.h>
+#include <Fonts/FreeSans12pt7b.h>
+#define PANEL_ID "7.3"
 static const int W = 800, H = 480;
-static const size_t IMAGE_BYTES = W * H / 2;
-
-// Palette index order must match web/dither.js
+static const bool NATIVE_PORTRAIT = false;
 static const uint16_t PALETTE[6] = {GxEPD_BLACK, GxEPD_WHITE, GxEPD_YELLOW, GxEPD_RED, GxEPD_BLUE, GxEPD_GREEN};
-
 // GDEP073E01 uses the same ED2208 controller as Seeed's 7.3" Spectra 6 panel.
 GxEPD2_7C<GxEPD2_730c_GDEP073E01, GxEPD2_730c_GDEP073E01::HEIGHT / 4>
     display(GxEPD2_730c_GDEP073E01(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
+#endif
+
+static const size_t IMAGE_BYTES = (size_t)W * H / 2;
 
 Preferences prefs;
 String frameId, deviceKey, etag;
@@ -39,12 +54,60 @@ uint32_t sleepMinutes = SLEEP_MINUTES;  // replaced by the server's X-Sleep-Minu
 String orientation = "landscape";
 bool orientationPending = false;
 
+// Hung the other way from how the panel's rows run: messages are turned to read upright
+// (rotation 1, matching how the upload page turns pictures: web/dither.js toPanelOrder).
+bool turned() { return (orientation == "portrait") != NATIVE_PORTRAIT; }
+
 // ---------------------------------------------------------------------------
 
-void displayBegin() {
+void displayPower(bool on) {
   pinMode(EPD_ENABLE, OUTPUT);
-  digitalWrite(EPD_ENABLE, HIGH);
-  delay(10);
+  digitalWrite(EPD_ENABLE, on ? HIGH : LOW);
+  if (on) delay(10);
+}
+
+#if defined(DOMIFRAME_PANEL_13IN3)
+
+void showMessage(const char* title, const char* line1, const char* line2 = nullptr) {
+  displayPower(true);
+  epaper.begin();
+  epaper.setRotation(turned() ? 1 : 0);
+  epaper.fillScreen(TFT_WHITE);
+  epaper.setTextColor(TFT_BLACK, TFT_WHITE);
+  epaper.setTextDatum(TL_DATUM);
+  // The 7.3" layout, doubled
+  epaper.setFreeFont(&FreeSansBold18pt7b);
+  epaper.setTextSize(2);
+  epaper.drawString(title, 80, 180);
+  epaper.setFreeFont(&FreeSans12pt7b);
+  epaper.drawString(line1, 80, 320);
+  if (line2) epaper.drawString(line2, 80, 400);
+  const uint16_t bars[4] = {TFT_RED, TFT_YELLOW, TFT_GREEN, TFT_BLUE};
+  for (int i = 0; i < 4; i++) epaper.fillRect(80 + i * 120, 800, 120, 24, bars[i]);
+  epaper.update();
+  epaper.sleep();
+}
+
+void drawPacked(const uint8_t* buf) {
+  displayPower(true);
+  epaper.begin();
+  epaper.setRotation(0);  // the picture's bytes are already in panel order
+  for (int y = 0; y < H; y++) {
+    const uint8_t* row = buf + (size_t)y * (W / 2);
+    for (int x = 0; x < W; x += 2) {
+      uint8_t b = row[x >> 1];
+      epaper.drawPixel(x, y, PALETTE[(b >> 4) % 6]);
+      epaper.drawPixel(x + 1, y, PALETTE[(b & 0x0F) % 6]);
+    }
+  }
+  epaper.update();
+  epaper.sleep();
+}
+
+#else  // 7.3"
+
+void displayBegin() {
+  displayPower(true);
   display.init(115200, true, 2, false);
   display.setRotation(0);
 }
@@ -54,7 +117,7 @@ void showMessage(const char* title, const char* line1, const char* line2 = nullp
   display.setFullWindow();
   display.firstPage();
   do {
-    display.setRotation(orientation == "portrait" ? 1 : 0);  // upright on a portrait-hung frame
+    display.setRotation(turned() ? 1 : 0);  // upright however the frame hangs
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
     display.setFont(&FreeSansBold18pt7b);
@@ -91,6 +154,8 @@ void drawPacked(const uint8_t* buf) {
   } while (display.nextPage());
   display.hibernate();
 }
+
+#endif
 
 int readBatteryMv() {
   pinMode(BAT_ADC_ENABLE_PIN, OUTPUT);
@@ -192,6 +257,7 @@ bool fetchAndDraw(int batteryMv) {
   http.addHeader("X-Device-Key", deviceKey);
   http.addHeader("X-Battery-Mv", String(batteryMv));
   http.addHeader("X-Fw", FW_VERSION);
+  http.addHeader("X-Panel", PANEL_ID);  // the server makes pictures this size
   if (etag.length()) http.addHeader("If-None-Match", etag);
   if (orientationPending) http.addHeader("X-Set-Orientation", orientation);
   const char* keep[] = {"ETag", "X-Sleep-Minutes", "X-Orientation"};

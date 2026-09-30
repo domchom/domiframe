@@ -30,8 +30,12 @@ jobs:
           path: ~/.platformio
           key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
       - run: pip install platformio
-      - run: pio run -d firmware
+      - run: pio run -d firmware -e ee04 -e ee02-13in3
       - uses: actions/upload-artifact@v4
         with:
-          name: firmware
+          name: firmware-7in3-ee04
           path: firmware/.pio/build/ee04/firmware.bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-13in3-ee02
+          path: firmware/.pio/build/ee02-13in3/firmware.bin
