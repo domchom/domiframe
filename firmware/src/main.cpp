@@ -16,6 +16,7 @@
 #include <WiFiClientSecure.h>
 #include <Preferences.h>
 #include <SPI.h>
+#include <esp_wifi.h>
 #include <driver/rtc_io.h>
 #include "config.h"
 
@@ -44,6 +45,18 @@ GxEPD2_7C<GxEPD2_730c_GDEP073E01, GxEPD2_730c_GDEP073E01::HEIGHT / 4>
 #endif
 
 static const size_t IMAGE_BYTES = (size_t)W * H / 2;
+
+#if VERIFY_TLS
+// Mozilla's root certificates (firmware/data/cert, made by tools/make_ca_bundle.py), so the
+// frame trusts the server's certificate whichever CA issued it. Hosts switch between CAs,
+// so a single pinned root would eventually lock every frame out.
+extern const uint8_t CA_BUNDLE[] asm("_binary_data_cert_x509_crt_bundle_bin_start");
+#endif
+
+// Kept in RTC memory across deep sleep: the access point we joined last time, so the next wake
+// can skip the Wi-Fi scan and connect straight away (the radio is the biggest battery drain).
+RTC_DATA_ATTR uint8_t rtcBssid[6];
+RTC_DATA_ATTR int32_t rtcChannel = 0;
 
 Preferences prefs;
 String frameId, deviceKey, etag;
@@ -230,25 +243,57 @@ bool runSetupPortal() {
     saveString("orient", orientation);
     saveOrientationPending(true);  // tell the server at the next check-in
   }
+  rtcChannel = 0;  // maybe a new network
   // force a redraw after setup
   etag = "";
   saveString("etag", etag);
   return ok && WiFi.status() == WL_CONNECTED;
 }
 
-bool connectWifi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.begin();  // credentials stored by WiFiManager
+bool waitForWifi(uint32_t ms) {
   uint32_t start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 20000) delay(200);
+  while (WiFi.status() != WL_CONNECTED && millis() - start < ms) delay(50);
   return WiFi.status() == WL_CONNECTED;
+}
+
+void rememberAccessPoint() {
+  const uint8_t* bssid = WiFi.BSSID();
+  if (!bssid) return;
+  memcpy(rtcBssid, bssid, 6);
+  rtcChannel = WiFi.channel();
+}
+
+bool connectWifi() {
+  // RAM only: never rewrite the network WiFiManager saved, on every wake, with a pinned AP.
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  wifi_config_t conf;
+  if (esp_wifi_get_config(WIFI_IF_STA, &conf) != ESP_OK || !conf.sta.ssid[0]) return false;
+  char ssid[33] = {0}, pass[65] = {0};
+  memcpy(ssid, conf.sta.ssid, 32);
+  memcpy(pass, conf.sta.password, 64);
+
+  // Fast path: straight to last time's access point and channel
+  if (rtcChannel > 0) {
+    WiFi.begin(ssid, pass, rtcChannel, rtcBssid);
+    if (waitForWifi(5000)) return true;
+    WiFi.disconnect();
+    rtcChannel = 0;
+  }
+  WiFi.begin(ssid, pass);  // scan: the router may have moved channel or been replaced
+  if (!waitForWifi(20000)) return false;
+  rememberAccessPoint();
+  return true;
 }
 
 // Returns true if a new picture was drawn.
 bool fetchAndDraw(int batteryMv) {
   WiFiClientSecure client;
-  // TODO: pin the Let's Encrypt root CA (ISRG Root X1) instead of skipping verification.
+#if VERIFY_TLS
+  client.setCACertBundle(CA_BUNDLE);
+#else
   client.setInsecure();
+#endif
 
   HTTPClient http;
   String url = String(SERVER_BASE) + "/api/frames/" + frameId + "/image";

@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "0 9 * * 1"  # weekly, for the TLS check: hosting can switch certificate authority
 
 jobs:
   test:
@@ -39,3 +41,14 @@ jobs:
         with:
           name: firmware-13in3-ee02
           path: firmware/.pio/build/ee02-13in3/firmware.bin
+
+  tls:
+    name: Frames trust the server's certificate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install cryptography
+      - run: python3 firmware/tools/make_ca_bundle.py --check domiframe.art

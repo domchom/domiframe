@@ -1,8 +1,12 @@
 #pragma once
 
 // ---- Server ---------------------------------------------------------------
-#define SERVER_BASE "https://domiframe.com"
-#define FW_VERSION "0.4.0"
+#define SERVER_BASE "https://domiframe.art"
+#define FW_VERSION "0.5.0"
+
+// Check the server's HTTPS certificate against Mozilla's root CAs (data/cert). 0 skips the
+// check, for debugging only: anyone on the frame's network could then read its device key.
+#define VERIFY_TLS 1
 
 // How often the frame wakes to check for a new picture when the server doesn't say
 // (offline, or an old server). Normally the server sends X-Sleep-Minutes, set per frame on
