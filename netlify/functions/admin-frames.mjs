@@ -7,7 +7,7 @@
 // Auth: Authorization: Bearer <ADMIN_TOKEN>  (set ADMIN_TOKEN in Netlify env vars)
 
 import {
-  FRAME_ID_RE, frames, status, states, newKey, hashKey, isAdmin, json, loadFrame, loadState,
+  FRAME_ID_RE, frames, status, states, newKey, newFrameCode, hashKey, isAdmin, json, loadFrame, loadState,
   deletePictureFiles, frameSummary,
 } from "../lib/common.mjs";
 import { mergeSettings } from "../lib/schedule.mjs";
@@ -60,7 +60,7 @@ async function create(req) {
   const { settings, error } = mergeSettings({}, body.panel ? { panel: String(body.panel) } : {});
   if (error) return json({ error }, 400);
 
-  const uploadKey = newKey();
+  const uploadKey = newFrameCode();
   const deviceKey = newKey();
   await frames().setJSON(id, {
     name,
@@ -77,7 +77,7 @@ async function create(req) {
       uploadKey,
       deviceKey,
       uploadLink: uploadLink(req, id, uploadKey),
-      note: "Keys are shown only once. Give uploadLink to your friend; enter id + deviceKey in the frame's setup portal.",
+      note: "Keys are shown only once. Give uploadLink (or id + uploadKey, the frame code) to your friend; enter id + deviceKey in the frame's setup portal.",
     },
     201
   );
@@ -86,7 +86,7 @@ async function create(req) {
 async function replaceKey(req, id, frame) {
   const body = await req.json().catch(() => ({}));
   if (body.key !== "upload" && body.key !== "device") return json({ error: 'key must be "upload" or "device"' }, 400);
-  const key = newKey();
+  const key = body.key === "upload" ? newFrameCode() : newKey();
   await frames().setJSON(id, { ...frame, [`${body.key}KeyHash`]: hashKey(key) });
   return json(
     body.key === "upload"

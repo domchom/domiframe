@@ -6,11 +6,11 @@ Battery-powered color e-paper photo frames. Friends send pictures from a link on
   - Seeed XIAO ePaper Display Board **EE04** (XIAO ESP32-S3 Plus) + Seeed **7.3"** E Ink Spectra 6 panel (800×480), or
   - Seeed XIAO ePaper Display Board **EE02** (XIAO ESP32-S3 Plus) + Seeed **13.3"** E Ink Spectra 6 panel (1200×1600)
   - plus a 3.7 V LiPo
-- **Server:** Netlify (static site + Functions + Blobs) at `domiframe.com`
+- **Server:** Netlify (static site + Functions + Blobs) at `domiframe.art`
 - **Upload page:** dithers the photo to the panel's 6 inks in the browser, so the server just stores bytes
 
 ```
-Friend's phone ──POST image──▶ domiframe.com ──▶ Netlify Blobs (picture queue per frame)
+Friend's phone ──POST image──▶ domiframe.art ──▶ Netlify Blobs (picture queue per frame)
                                                       │
 Frame (wakes on schedule or KEY1) ──GET + ETag────────┘
    304 unchanged → sleep     200 new picture → redraw (~20 s) → sleep
@@ -23,7 +23,7 @@ Each frame keeps up to 200 pictures, optionally sorted into folders; the frame c
 
 | Path | What it is |
 |---|---|
-| `web/` | Static site: landing page, friend upload page, dithering (`dither.js`) |
+| `web/` | Static site: home page (about + My frame), friend upload page, dithering (`dither.js`) |
 | `netlify/functions/` | API endpoints |
 | `netlify/lib/common.mjs` | Shared helpers (stores, key hashing, picture queue storage) |
 | `netlify/lib/schedule.mjs` | Which picture to show and when the frame wakes (pure functions) |
@@ -42,11 +42,12 @@ Each frame keeps up to 200 pictures, optionally sorted into folders; the frame c
 | `DELETE /api/admin/frames/:id` | admin | Delete a frame and its pictures |
 | `POST /api/admin/frames/:id/keys` `{key: "upload"\|"device"}` | admin | Replace a key (old one stops working), shown once |
 | `GET /api/frames/:id/image` | `X-Device-Key` | Frame download (`ETag` / `304`, `204` if empty), always with `X-Sleep-Minutes` |
-| `POST /api/frames/:id/image` | upload key or admin | Add a picture: packed image, preview PNG, and optionally original JPEG, `edits`, `from`, `album`, `queue` |
+| `POST /api/frames/:id/image` | upload key or admin | Add a picture: packed image, preview PNG, and optionally `thumb` JPEG, original JPEG, `edits`, `from`, `album`, `queue` |
 | `GET /api/frames/:id/info` | upload key or admin | Name, check-ins, battery, settings, picture queue |
 | `GET /api/frames/:id/preview` | upload key or admin | PNG of the picture on the frame now |
 | `PUT /api/frames/:id/settings` | upload key or admin | `rotateHours`, `checkMinutes`, `album`, `order`, `quiet`, `quietStart`, `quietEnd`, `tz` |
 | `GET /api/frames/:id/pictures/:pic` | upload key or admin | One picture's PNG preview |
+| `GET /api/frames/:id/pictures/:pic/thumb` | upload key or admin | Small JPEG for the picture grid (the PNG preview for older pictures) |
 | `GET /api/frames/:id/pictures/:pic/original` | upload key or admin | The photo as uploaded (JPEG), for editing again |
 | `PUT /api/frames/:id/pictures/:pic` | upload key or admin | Replace with an edited version (keeps place and folder) |
 | `POST /api/frames/:id/pictures/:pic/show` | upload key or admin | Put it up at the next check-in |
@@ -61,22 +62,26 @@ Each frame keeps up to 200 pictures, optionally sorted into folders; the frame c
 Image format: 4 bits per pixel, two pixels per byte (high nibble = left), rows in the panel's own layout: 7.3" = 800×480 (192,000 bytes), 13.3" = 1200×1600 (960,000 bytes). Pictures made for the frame's orientation are turned 90° clockwise when it hangs the other way from the panel's rows (`toPanelOrder` in `web/dither.js`). Each frame has a `panel` setting (`"7.3"` or `"13.3"`); the firmware reports it on every check-in (`X-Panel`), and pictures made for another screen size are never sent.
 Palette indices: `0 black, 1 white, 2 yellow, 3 red, 4 blue, 5 green` (shared by `web/dither.js` and `firmware/src/main.cpp`).
 
+Picture files never change (editing a picture gives it a new id), so they're served with `Cache-Control: immutable` and browsers only download each one once. Changes to a frame's picture queue are conditional writes (`onlyIfMatch`), retried on conflict, so a frame checking in during an upload can't lose a picture.
+
+Upload keys are **frame codes** like `K7PX-92QD-M4TR-8WZN` (16 characters of Crockford base32, 80 random bits), so they can be typed: the home page's **My frame** tab takes a frame ID and code (or a pasted link) and remembers frames opened on that device. Codes are forgiving about case, spaces, dashes and O/I/L (`web/code.js`). Frames created before codes keep their long keys until you make a new upload link.
+
 Keys are stored as SHA-256 hashes. The upload key travels in the link's `#fragment`, so it isn't sent in page requests or server logs.
 
 ## Deploy (Netlify)
 
-1. New site from this GitHub repo. Build settings come from `netlify.toml` (publish `web`, functions `netlify/functions`).
-2. **Site configuration → Environment variables:** add `ADMIN_TOKEN` (a long random string, e.g. `openssl rand -base64 32`). Optionally `PUBLIC_URL=https://domiframe.com`.
-3. **Domain management:** add `domiframe.com` and follow Netlify's DNS instructions at your registrar.
+1. New site from this GitHub repo. Build settings come from `netlify.toml` (publish `web`, functions `netlify/functions`). Pushes that only change firmware, tests or docs skip the deploy (`ignore` in `netlify.toml`), which saves credits on the Free plan.
+2. **Site configuration → Environment variables:** add `ADMIN_TOKEN` (a long random string, e.g. `openssl rand -base64 32`). Optionally `PUBLIC_URL=https://domiframe.art`.
+3. **Domain management:** add `domiframe.art` and follow Netlify's DNS instructions at your registrar.
 
 ## Add a frame
 
-Open `https://domiframe.com/admin.html`, sign in with `ADMIN_TOKEN`, and use **Add a frame**. It shows the upload link (with a QR code) and the device key once. **Open** on a frame shows its pictures and settings; **New upload link** / **New device key** replace a leaked key.
+Open `https://domiframe.art/admin.html`, sign in with `ADMIN_TOKEN`, and use **Add a frame**. It shows the upload link (with a QR code) and the device key once. **Open** on a frame shows its pictures and settings; **New upload link** / **New device key** replace a leaked key.
 
 Or with curl:
 
 ```bash
-curl -X POST https://domiframe.com/api/admin/frames \
+curl -X POST https://domiframe.art/api/admin/frames \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
   -d '{"id":"emma","name":"Emma'\''s frame"}'
 ```
@@ -120,7 +125,8 @@ To test schedules, the virtual frame can follow the server's `X-Sleep-Minutes` i
 - Firmware **compiles** (CI builds both screens on every push) but has **not run on hardware yet**. 7.3": pins come from Seeed's `Seeed_GFX` EE04 setup and the EE04 wiki; the display uses GxEPD2's `GxEPD2_730c_GDEP073E01` driver, which targets the same ED2208 controller as Seeed's 7.3" Spectra 6 panel. 13.3": uses Seeed's own `Seeed_GFX` (`BOARD_SCREEN_COMBO=510`, T133A01 driver), pinned to a known commit.
 - EE02 buttons and battery pins aren't published; the 13.3" build assumes they match the EE04 (its display pins do). Check against the EE02 schematic.
 - On a frame hung the other way from its panel's rows (a portrait 7.3", a landscape 13.3"), check that pictures and status messages are the right way up; if not, flip `rotateCW` in `web/dither.js` and the rotation in `showMessage()`.
-- TLS: the frame currently skips certificate verification (`setInsecure()`). Pin the Let's Encrypt root before giving frames away.
+- TLS: the frame checks the server's certificate against Mozilla's root CAs, embedded as `firmware/data/cert/x509_crt_bundle.bin` (`VERIFY_TLS` in `config.h`), so it keeps working whichever CA issues the certificate. Unlike a browser, the ESP32 only looks up the issuer of the *last* certificate the server sends, so after pointing domiframe.art at Netlify, check it: `python3 firmware/tools/make_ca_bundle.py --check domiframe.art` (CI also runs this weekly). If it names a missing root, add it to `firmware/tools/extra_roots.pem`, rebuild the bundle and reflash. Rebuild it every year or so anyway: `python3 firmware/tools/make_ca_bundle.py`.
+- Wi-Fi: the frame remembers the access point and channel in RTC memory across deep sleep and reconnects without scanning, falling back to a normal connect if that fails within 5 s.
 - How each frame hangs (landscape or portrait) is a frame setting. Pictures for a portrait frame are packed turned 90° clockwise onto the panel; if they come out upside down on a real portrait-hung frame, flip the rotation in `web/dither.js` (`rotatePortraitToPanel`).
 - Palette RGB values in `web/dither.js` are approximations of the real inks; tune them after comparing the preview with the panel.
 - Battery reading uses Seeed's `raw / 4096 × 7.16` formula; check against a multimeter.

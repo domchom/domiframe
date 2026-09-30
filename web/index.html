@@ -3,19 +3,109 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DomiFrame</title>
+  <title>DomiFrame · color e-paper photo frames</title>
+  <meta name="description" content="Battery-powered color e-paper photo frames. Friends send pictures from their phone; the frame shows them in six real inks.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/brand.js"></script>
 </head>
 <body>
-  <main class="wrap">
-    <section class="hero">
-      <span class="mark" aria-hidden="true"></span>
-      <h1>DomiFrame</h1>
-      <p class="muted">Color e-paper photo frames.<br>Open the link you were given to send a picture to your frame.</p>
-    </section>
+  <main class="wrap home">
+    <header class="site-head">
+      <a class="home-link brand" href="/" aria-label="DomiFrame home"><h1>DomiFrame</h1><span class="mark" aria-hidden="true"></span></a>
+      <nav class="site-tabs" role="tablist" aria-label="Sections">
+        <button type="button" role="tab" data-page="about" aria-controls="page-about">About</button>
+        <button type="button" role="tab" data-page="frame" aria-controls="page-frame">My frame</button>
+      </nav>
+    </header>
+
+    <!-- About -->
+    <div id="page-about" data-page-panel="about" role="tabpanel">
+      <section class="intro-grid">
+        <div class="intro-copy">
+          <p class="eyebrow">Color e-paper photo frames</p>
+          <h2 class="headline">Pictures from the people you love, printed in ink that stays put.</h2>
+          <p class="lede">DomiFrame is a picture frame with an E&nbsp;Ink screen. Friends and family send photos from a link on their phone; the frame picks them up, draws them in six real inks, and goes back to sleep. No app, no account, no glowing screen on the wall.</p>
+          <div class="cta">
+            <button type="button" class="primary" data-go="frame">Open my frame</button>
+            <a class="chip" href="#how">How it works</a>
+          </div>
+        </div>
+        <figure class="sample">
+          <div class="print"><canvas id="sample" width="400" height="240" aria-label="An example picture, dithered to the frame's six inks"></canvas></div>
+          <figcaption><span class="ink-dots" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>Six inks. Every other color is made of dots.</figcaption>
+        </figure>
+      </section>
+
+      <section class="card" id="how">
+        <div class="section-head"><h2 class="section-title">How it works</h2><p class="meta">about a minute, start to finish</p></div>
+        <ol class="steps">
+          <li>
+            <b>Pick a photo</b>
+            <p>Open your frame's link on any phone or computer and choose a photo, or a whole folder. Crop it, brighten it, sign it with your name.</p>
+          </li>
+          <li>
+            <b>It's turned into ink</b>
+            <p>Right in your browser, the photo is dithered into the panel's six inks: black, white, red, yellow, blue and green. The preview is exactly what the frame will show.</p>
+          </li>
+          <li>
+            <b>The frame wakes and draws it</b>
+            <p>At its next check-in, or when someone presses its button, the frame downloads the picture, redraws in about 20 seconds, and sleeps again.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="card">
+        <div class="section-head"><h2 class="section-title">The frame</h2><p class="meta">E Ink Spectra 6</p></div>
+        <div class="about-grid">
+          <dl class="spec">
+            <div><dt>Screens</dt><dd>7.3" (800 × 480) or 13.3" (1600 × 1200)</dd></div>
+            <div><dt>Inks</dt><dd>6: black, white, red, yellow, blue, green</dd></div>
+            <div><dt>Power</dt><dd>Rechargeable battery, months per charge</dd></div>
+            <div><dt>Screen power</dt><dd>None: the picture stays with the power off</dd></div>
+            <div><dt>Updates</dt><dd>Wi-Fi check-ins, on a schedule you set</dd></div>
+            <div><dt>Holds</dt><dd>Up to 200 pictures, in folders, in order or shuffled</dd></div>
+          </dl>
+          <div class="notes">
+            <h3>Why e-paper</h3>
+            <p>An E Ink screen reflects light like paper instead of shining it, so a picture looks printed rather than lit, and it doesn't use any power to stay on the wall. The frame only wakes to check for new pictures, then sleeps.</p>
+            <h3>Private by design</h3>
+            <p>Each frame has its own link and code. There are no accounts or public galleries: only people you give the link to can add pictures.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- My frame -->
+    <div id="page-frame" data-page-panel="frame" role="tabpanel" hidden>
+      <section class="card open-card">
+        <p class="eyebrow">My frame</p>
+        <h2>Open your frame</h2>
+
+        <div id="saved" hidden>
+          <h3>On this device</h3>
+          <ul class="saved-frames" id="saved-list"></ul>
+        </div>
+
+        <form id="open-form" class="open-form" novalidate>
+          <h3 id="open-title">Enter your frame's details</h3>
+          <label class="slider">Frame ID
+            <input id="open-id" class="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="e.g. emma" required>
+          </label>
+          <label class="slider">Frame code
+            <input id="open-code" class="text code-input" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX" required>
+          </label>
+          <button class="primary" id="open-go">Open frame</button>
+          <p id="open-msg" class="msg" role="status"></p>
+          <p class="tip">Got a link instead? Paste it into either box. You'll find the ID and code on the card that came with the frame, or ask whoever set it up.</p>
+        </form>
+      </section>
+    </div>
+
+    <p class="muted small foot">DomiFrame · color e-paper photo frames</p>
   </main>
+  <script type="module" src="/home.js"></script>
 </body>
 </html>

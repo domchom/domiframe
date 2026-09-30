@@ -15,7 +15,7 @@
 
 import {
   frames, images, status, loadFrame, keyMatches, canManage, json,
-  now, newPictureId, loadState, saveState, deletePictureFiles, readPictureForm, storePicture,
+  now, newPictureId, updateState, loadState, deletePictureFiles, readPictureForm, storePicture,
 } from "../lib/common.mjs";
 import { choosePicture, nextWakeMinutes, addPicture, mergeSettings, fitsPanel } from "../lib/schedule.mjs";
 
@@ -53,12 +53,16 @@ async function deviceFetch(req, id, frame) {
   const parsedMv = parseInt(req.headers.get("x-battery-mv") || "", 10);
   const mv = Number.isFinite(parsedMv) && parsedMv > 0 ? parsedMv : null;
 
-  const before = await loadState(id);
-  const { state, changed } = choosePicture(before, frame.settings, t);
-  if (changed) await saveState(id, state);
+  let state = null;
+  const saved = await updateState(id, (before) => {
+    const out = choosePicture(before, frame.settings, t);
+    state = out.state;
+    return out.changed ? out.state : null;
+  });
+  state = saved || state;
 
   const sleepMinutes = nextWakeMinutes(state, frame.settings, t, mv);
-  await status().setJSON(id, {
+  const statusWrite = status().setJSON(id, {
     lastSeen: new Date(t).toISOString(),
     batteryMv: mv,
     fw: (req.headers.get("x-fw") || "").slice(0, 20) || null,
@@ -69,14 +73,18 @@ async function deviceFetch(req, id, frame) {
 
   // Never send a picture made for another screen size: the frame would reject the byte count
   const pic = state.pictures.find((p) => p.id === state.current && fitsPanel(p, frame.settings));
-  if (!pic) return new Response(null, { status: 204, headers: sleep });
+  if (!pic) {
+    await statusWrite;
+    return new Response(null, { status: 204, headers: sleep });
+  }
 
   const etag = `"${pic.etag}"`;
   if (req.headers.get("if-none-match") === etag) {
+    await statusWrite;
     return new Response(null, { status: 304, headers: { etag, ...sleep } });
   }
 
-  const data = await images().get(`${id}/${pic.id}.bin`, { type: "arrayBuffer" });
+  const [data] = await Promise.all([images().get(`${id}/${pic.id}.bin`, { type: "arrayBuffer" }), statusWrite]);
   if (!data) return json({ error: "picture missing" }, 500, sleep);
   return new Response(data, {
     status: 200,
@@ -103,19 +111,23 @@ async function upload(req, id, frame) {
   const { parts, error } = await readPictureForm(form, panel);
   if (error) return json({ error }, 400);
 
-  let state = await loadState(id);
   const album = String(form.get("album") || "") || null;
-  if (album && !state.albums.some((a) => a.id === album)) return json({ error: "no such folder" }, 400);
+  if (album && !(await loadState(id)).albums.some((a) => a.id === album)) return json({ error: "no such folder" }, 400);
 
   const pic = await storePicture(id, newPictureId(), parts, panel);
   pic.album = album;
   pic.from = String(form.get("from") || "").trim().slice(0, 40) || null;
 
-  let removed;
-  ({ state, removed } = addPicture(state, pic));
-  // Marking it seen keeps it from jumping the queue; it comes round with the rotation.
-  if (form.get("queue") === "rotation") state.seen.push(pic.id);
-  await saveState(id, state);
+  let removed = [];
+  const saved = await updateState(id, (before) => {
+    if (album && !before.albums.some((a) => a.id === album)) pic.album = null; // folder deleted meanwhile
+    const out = addPicture(before, pic);
+    removed = out.removed;
+    // Marking it seen keeps it from jumping the queue; it comes round with the rotation.
+    if (form.get("queue") === "rotation") out.state.seen.push(pic.id);
+    return out.state;
+  });
+  if (!saved) return json({ error: "couldn't save" }, 500);
   if (removed.length) await deletePictureFiles(id, removed);
 
   return json({ ok: true, id: pic.id, etag: pic.etag, uploadedAt: pic.uploadedAt });

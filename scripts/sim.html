@@ -6,70 +6,121 @@
   <title>Virtual Frame</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/brand.js"></script>
   <style>
-    .wrap { max-width: 900px; }
-    .bezel {
-      background: #2a2826; padding: 18px; border-radius: 10px;
-      box-shadow: 0 8px 30px rgba(0,0,0,.25), inset 0 0 0 2px #3a3733;
+    .wrap { max-width: 1000px; }
+    .intro { font: 13px/1.6 var(--mono); color: var(--muted); margin: 0 0 22px; max-width: 70ch; }
+    #status { color: var(--ink); }
+
+    /* The device: a black bezel around the panel, a label on the chin, a dithered shadow */
+    .device { --sh: 10px; --bw: 0px; position: relative; margin: 0 10px 34px 0; }
+    .device::after {
+      content: ""; position: absolute; pointer-events: none;
+      top: var(--sh); left: var(--sh); right: calc(-1 * var(--sh)); bottom: calc(-1 * var(--sh));
+      clip-path: polygon(calc(100% - var(--sh)) 0, 100% 0, 100% 100%, 0 100%, 0 calc(100% - var(--sh)),
+                         calc(100% - var(--sh)) calc(100% - var(--sh)));
+      background: conic-gradient(var(--ink) 25%, transparent 0 50%, var(--ink) 0 75%, transparent 0) 0 0 / 2px 2px;
     }
-    canvas { display: block; width: 100%; height: auto; background: #e8e8e8; image-rendering: pixelated; }
+    .bezel { background: #0d0f10; padding: 22px 22px 0; border: 2px solid #000; }
+    #screen { display: block; width: 100%; height: auto; background: #e8e8e8; image-rendering: pixelated; }
+    .chin {
+      display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 2px 12px;
+      font: 500 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: #6d7479;
+    }
+    .led { display: inline-block; width: 6px; height: 6px; margin-right: 8px; background: #2c3236; vertical-align: 1px; }
+    .led.on { background: var(--ink-green); box-shadow: 0 0 0 2px rgba(18, 95, 32, .35); }
     /* A frame hung portrait: shown upright, as tall as fits */
-    .bezel.portrait { width: fit-content; margin: 0 auto; }
-    .bezel.portrait canvas { width: auto; height: min(75vh, 800px); }
-    .keys { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
-    .keys button, .keys select { width: auto; margin: 0; font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
-    .keys button.primary { background: var(--accent); color: #fff; border-color: transparent; }
-    .keys button:disabled { opacity: .5; cursor: default; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 16px; }
-    label { display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
-    input { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--ink); min-width: 0; }
-    #log { font: 13px/1.5 ui-monospace, Menlo, monospace; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px; height: 180px; overflow: auto; white-space: pre-wrap; margin-top: 14px; }
-    .state { font-size: 14px; color: var(--muted); }
+    .device.portrait { width: fit-content; margin-left: auto; margin-right: auto; }
+    .device.portrait #screen { width: auto; height: min(75vh, 800px); }
+
+    .panels { display: grid; gap: 0 22px; }
+    @media (min-width: 820px) { .panels { grid-template-columns: 1fr 1fr; } }
+    .panels .card { margin-bottom: 28px; }
+    .card h3 { margin: 0 0 14px; }
+    .keys { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 14px; }
+    .keys button.primary { width: auto; flex: 1 1 180px; margin: 0; padding: 14px 16px; }
+    .keys .chip { padding: 12px 14px; }
+    .keys .chip.key { flex: 1 1 140px; }
+    .keys .chip:disabled, .keys button.primary:disabled { opacity: .45; cursor: default; }
+    .skip .chip { flex: 1; padding: 10px 8px; }
+    #clock { font: 12px/1.4 var(--mono); color: var(--muted); margin: 0; }
+    .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+    .fields .slider { margin: 0 0 14px; }
+    .fields .wide { grid-column: 1 / -1; }
+    .fields input.text { font: 13px/1.4 var(--mono); }
+    .battery { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+    .battery input { flex: 1; margin: 0; }
+    #mvText { font: 12px var(--mono); color: var(--ink); min-width: 64px; text-align: right; }
+
+    #log {
+      font: 12px/1.6 var(--mono); background: #0d0f10; color: #d6dadd; border: 2px solid #000;
+      padding: 12px 14px; height: 200px; overflow: auto; white-space: pre-wrap; margin: 0;
+    }
+    .log-head { display: flex; justify-content: space-between; align-items: baseline; margin: 0 0 8px; }
   </style>
 </head>
 <body>
   <main class="wrap">
-    <div class="brand"><span class="mark" aria-hidden="true"></span><h1>Virtual frame</h1></div>
-    <p class="state">Behaves like the firmware: sends the device key, battery and ETag, redraws only on a new picture, and sleeps as long as the server says. <span id="status"></span></p>
+    <header class="brand"><h1>Virtual frame</h1><span class="mark" aria-hidden="true"></span></header>
+    <p class="intro">Behaves like the firmware: sends the device key, battery and ETag, redraws only on a
+      new picture, and sleeps as long as the server says. <span id="status"></span></p>
 
-    <div class="bezel"><canvas id="screen" width="800" height="480"></canvas></div>
-
-    <div class="keys">
-      <button id="key1" class="primary">KEY1 · check now</button>
-      <button id="key3">KEY3 · forget ETag</button>
-      <select id="auto" aria-label="Automatic wake">
-        <option value="0">Auto wake: off</option>
-        <option value="1">Auto wake: server schedule, real time</option>
-        <option value="60">Auto wake: server schedule, 1 h per minute</option>
-        <option value="3600">Auto wake: server schedule, 1 h per second</option>
-      </select>
-    </div>
-    <div class="keys">
-      <span class="state">Skip ahead, then wake:</span>
-      <button data-skip="60">+1 hour</button>
-      <button data-skip="1440">+1 day</button>
-      <button data-skip="10080">+1 week</button>
-      <button id="clock-reset">Reset clock</button>
-      <span class="state" id="clock"></span>
+    <div class="device" id="device">
+      <div class="bezel">
+        <canvas id="screen" width="800" height="480"></canvas>
+        <div class="chin"><span><i class="led" id="led"></i>DomiFrame</span><span id="chin-model">Spectra 6</span></div>
+      </div>
     </div>
 
-    <div class="grid">
-      <label>Frame ID <input id="id" autocomplete="off"></label>
-      <label>Device key <input id="key" autocomplete="off"></label>
-      <label>Battery <span><input id="mv" type="range" min="3300" max="4200" step="10" value="3900" style="width:70%"> <span id="mvText"></span></span></label>
-      <label>Screen
-        <select id="screen-size" style="font:inherit;padding:6px"><option value="7.3">7.3" (EE04)</option><option value="13.3">13.3" (EE02)</option></select>
-      </label>
-      <label>How the frame hangs
-        <select id="hang" style="font:inherit;padding:6px"><option value="landscape">Landscape (wide)</option><option value="portrait">Portrait (tall)</option></select>
-      </label>
-      <label>Refresh speed
-        <select id="speed" style="font:inherit;padding:6px"><option value="1">Instant</option><option value="4" selected>Quick (~4 s)</option><option value="20">Real (~20 s)</option></select>
-      </label>
+    <div class="panels">
+      <section class="card">
+        <h3>Buttons</h3>
+        <div class="keys">
+          <button id="key1" class="primary">KEY1 · check now</button>
+          <button id="key3" class="chip key">KEY3 · forget ETag</button>
+        </div>
+        <label class="slider">Wake by itself
+          <select id="auto">
+            <option value="0">Off: only when KEY1 is pressed</option>
+            <option value="1">On the server's schedule, real time</option>
+            <option value="60">On the server's schedule, 1 h per minute</option>
+            <option value="3600">On the server's schedule, 1 h per second</option>
+          </select>
+        </label>
+        <h3>Skip ahead, then wake</h3>
+        <div class="keys skip">
+          <button class="chip" data-skip="60">+1 hour</button>
+          <button class="chip" data-skip="1440">+1 day</button>
+          <button class="chip" data-skip="10080">+1 week</button>
+          <button class="chip" id="clock-reset">Reset</button>
+        </div>
+        <p id="clock"></p>
+      </section>
+
+      <section class="card">
+        <h3>Device</h3>
+        <div class="fields">
+          <label class="slider">Frame ID <input id="id" class="text" autocomplete="off"></label>
+          <label class="slider">Device key <input id="key" class="text" autocomplete="off"></label>
+          <label class="slider">Screen
+            <select id="screen-size"><option value="7.3">7.3" (EE04)</option><option value="13.3">13.3" (EE02)</option></select>
+          </label>
+          <label class="slider">Hangs
+            <select id="hang"><option value="landscape">Landscape (wide)</option><option value="portrait">Portrait (tall)</option></select>
+          </label>
+          <label class="slider">Refresh speed
+            <select id="speed"><option value="1">Instant</option><option value="4" selected>Quick (~4 s)</option><option value="20">Real (~20 s)</option></select>
+          </label>
+          <label class="slider">Battery
+            <span class="battery"><input id="mv" type="range" min="3300" max="4200" step="10" value="3900"><span id="mvText"></span></span>
+          </label>
+        </div>
+      </section>
     </div>
 
+    <div class="log-head"><h3>Serial log</h3></div>
     <div id="log"></div>
   </main>
 
@@ -101,7 +152,8 @@
       const [w, h] = turned() ? [H, W] : [W, H];
       if (screen.width !== w || screen.height !== h) { screen.width = w; screen.height = h; }
       screen.style.aspectRatio = `${w} / ${h}`;
-      screen.closest(".bezel").classList.toggle("portrait", h > w);
+      $("device").classList.toggle("portrait", h > w);
+      $("chin-model").textContent = `${PANELS[$("screen-size").value]?.name || ""} Spectra 6`;
       const sctx = screen.getContext("2d");
       // Turn the panel back, so the picture is upright
       if (turned()) sctx.setTransform(0, -1, 1, 0, 0, W);
@@ -203,7 +255,7 @@
     }
     async function wake(reason) {
       if (busy) return;
-      busy = true; $("key1").disabled = true;
+      busy = true; $("key1").disabled = true; $("led").classList.add("on");
       const id = $("id").value.trim(), key = $("key").value.trim();
       log(`wake (${reason}) frame=${id} battery=${$("mv").value}mV etag=${etag || "-"}`);
       try {
@@ -243,7 +295,7 @@
         log(`sleeping ${sleepMinutes} min`);
         await showClock();
         $("status").textContent = `Last check-in ${serverTime.toLocaleString()}, next in ${sleepMinutes} min.`;
-        busy = false; $("key1").disabled = false;
+        busy = false; $("key1").disabled = false; $("led").classList.remove("on");
         scheduleNext();
       }
     }

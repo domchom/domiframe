@@ -1,8 +1,11 @@
 [build]
   publish = "web"
   functions = "netlify/functions"
+  # Each production deploy costs credits: skip it when a push only touches firmware, tests,
+  # docs or CI. (Exit 0 = nothing the site uses changed.)
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- web/ netlify/ netlify.toml package.json package-lock.json"
 
-# Friend upload links look like https://domiframe.com/f/<frame-id>#k=<upload-key>
+# Friend upload links look like https://domiframe.art/f/<frame-id>#k=<upload-key>
 [[redirects]]
   from = "/f/*"
   to = "/upload.html"

@@ -29,7 +29,7 @@ after(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-const url = (p) => `https://domiframe.com${p}`;
+const url = (p) => `https://domiframe.art${p}`;
 
 test("dithering produces valid indices and packs to 192000 bytes", () => {
   const w = PANEL_W, h = PANEL_H;
@@ -352,4 +352,75 @@ test("13.3-inch frames: bigger pictures, and never a picture made for the other 
   const info = await (await frameInfo(new Request(url("/api/frames/big/info"), { headers: { authorization: `Bearer ${uploadKey}` } }), ctx)).json();
   assert.equal(info.settings.panel, "7.3");
   assert.equal(info.pictures[0].panel, "13.3");
+});
+
+test("uploads at the same time as check-ins all land; thumbnails and caching", async () => {
+  const res = await admin(new Request(url("/api/admin/frames"), {
+    method: "POST",
+    headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
+    body: JSON.stringify({ id: "busy", name: "Busy" }),
+  }), { params: {} });
+  const { uploadKey, deviceKey } = await res.json();
+  const ctx = { params: { id: "busy" } };
+  const post = (fill, thumb) => {
+    const f = new FormData();
+    f.append("image", new Blob([new Uint8Array(192000).fill(fill)]));
+    f.append("preview", new Blob([new Uint8Array([137, fill])], { type: "image/png" }));
+    if (thumb) f.append("thumb", new Blob([new Uint8Array([255, 216, fill])], { type: "image/jpeg" }));
+    return frameImage(new Request(url("/api/frames/busy/image"), { method: "POST", headers: { authorization: `Bearer ${uploadKey}` }, body: f }), ctx);
+  };
+  const dev = () => frameImage(new Request(url("/api/frames/busy/image"), { headers: { "x-device-key": deviceKey } }), ctx);
+  const get = (path) => frameInfo(new Request(url(`/api/frames/busy/${path}`), { headers: { authorization: `Bearer ${uploadKey}` } }), ctx);
+
+  // 8 uploads racing 4 check-ins: none is lost
+  const replies = await Promise.all([
+    ...[1, 2, 3, 4, 5, 0x10, 0x12, 0x14].map((fill, i) => post(fill, i % 2 === 0)),
+    dev(), dev(), dev(), dev(),
+  ]);
+  assert.ok(replies.every((r) => r.ok), "every request succeeded");
+  const info = await (await get("info")).json();
+  assert.equal(info.pictures.length, 8);
+
+  // thumbnail when one was sent, else the PNG preview; both cacheable forever (ids never change)
+  const all = await Promise.all(info.pictures.map(async (p) => (await get(`pictures/${p.id}/thumb`))));
+  const types = all.map((r) => r.headers.get("content-type"));
+  assert.equal(types.filter((t) => t === "image/jpeg").length, 4);
+  assert.equal(types.filter((t) => t === "image/png").length, 4);
+  assert.match(all[0].headers.get("cache-control"), /immutable/);
+  await dev();
+  assert.match((await get("preview")).headers.get("cache-control"), /no-cache/, "the current picture changes");
+
+  // palette check catches a bad nibble anywhere
+  for (const bad of [0x06, 0x60, 0x07, 0x80, 0x0f]) {
+    const f = new FormData();
+    const bytes = new Uint8Array(192000).fill(0x11);
+    bytes[191999] = bad;
+    f.append("image", new Blob([bytes]));
+    const r = await frameImage(new Request(url("/api/frames/busy/image"), { method: "POST", headers: { authorization: `Bearer ${uploadKey}` }, body: f }), ctx);
+    assert.equal(r.status, 400, `0x${bad.toString(16)} rejected`);
+  }
+});
+
+test("frame codes: new upload keys are typeable, and typed codes are forgiving", async () => {
+  const { normalizeCode, parseLink, isFrameCode } = await import("../web/code.js");
+  const res = await admin(new Request(url("/api/admin/frames"), {
+    method: "POST",
+    headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
+    body: JSON.stringify({ id: "typed", name: "Typed" }),
+  }), { params: {} });
+  const { uploadKey, uploadLink } = await res.json();
+  assert.match(uploadKey, /^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
+  assert.ok(isFrameCode(uploadKey));
+
+  // typed in lowercase with spaces, O for 0 and I for 1: still the same code
+  const messy = uploadKey.toLowerCase().replace(/-/g, " ").replace(/0/g, "o").replace(/1/g, "i");
+  assert.equal(normalizeCode(messy), uploadKey);
+  const info = (key) => frameInfo(new Request(url("/api/frames/typed/info"), { headers: { authorization: `Bearer ${key}` } }), { params: { id: "typed" } });
+  assert.equal((await info(normalizeCode(messy))).status, 200);
+  assert.equal((await info("AAAA-BBBB-CCCC-DDDD")).status, 404);
+
+  // older long keys pass through untouched; links are understood
+  assert.equal(normalizeCode("abc_DEF-ghi123456789012345678901"), "abc_DEF-ghi123456789012345678901");
+  assert.deepEqual(parseLink(uploadLink), { id: "typed", key: uploadKey });
+  assert.equal(parseLink("not a link"), null);
 });

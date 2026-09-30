@@ -192,6 +192,10 @@ function showResult(id, data, title) {
     body.append(field("Upload link: send this to your friend", data.uploadLink));
     const qr = qrSvg(data.uploadLink);
     if (qr) body.append(qr);
+    if (data.uploadKey) {
+      // Or, to type in on the home page (My frame): e.g. on a card in the box
+      body.append(field("Frame ID and code: for “My frame” on the home page", `${id}  ·  ${data.uploadKey}`));
+    }
   }
   if (data.deviceKey) {
     body.append(field("Frame ID: enter in the frame's setup portal", id));

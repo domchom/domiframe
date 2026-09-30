@@ -1,6 +1,7 @@
 import { sizeFor, toPanelOrder, panelOf, DEFAULTS, ditherToPalette, pack, indicesToRGBA } from "./dither.js";
 import { ask, tell } from "./dialog.js";
 import { ago, until, batteryPct, LOW_BATTERY_PCT, rotateLabel, checkLabel, hourLabel } from "./format.js";
+import { rememberFrame, isFrameCode, normalizeCode } from "./code.js";
 
 const $ = (id) => document.getElementById(id);
 const frameId = (location.pathname.match(/^\/f\/([a-z0-9-]+)/) || [])[1];
@@ -13,7 +14,7 @@ const asAdmin = hashParams.has("admin");
 let uploadKey = hashParams.get("k");
 try {
   if (asAdmin) uploadKey = localStorage.getItem("domiframe:admin");
-  else if (uploadKey) localStorage.setItem(storageKey, uploadKey);
+  else if (uploadKey) localStorage.setItem(storageKey, (uploadKey = normalizeCode(uploadKey)));
   else uploadKey = localStorage.getItem(storageKey);
 } catch { /* storage unavailable */ }
 
@@ -54,16 +55,26 @@ async function loadInfo() {
     return;
   }
   const info = await res.json();
+  if (!asAdmin) {
+    rememberFrame(frameId, info.name);
+    // Friends with a frame code can open this frame anywhere from the home page
+    $("device-access").hidden = !isFrameCode(uploadKey);
+    $("access-id").textContent = frameId;
+    $("access-code").textContent = uploadKey;
+  }
   $("frame-name").textContent = info.name || "Your frame";
   document.title = `${info.name || "Frame"} · DomiFrame`;
 
   const pct = batteryPct(info.batteryMv);
-  const next = until(info.nextCheckIn);
-  $("frame-status").textContent = info.lastSeen
-    ? `Last checked in ${ago(info.lastSeen)}` + (next ? ` · next ${next}` : "") + (pct != null ? ` · battery ${pct}%` : "")
-    : "The frame hasn't checked in yet.";
-  $("frame-status").classList.toggle("warn", pct != null && pct < LOW_BATTERY_PCT);
-  if (pct != null && pct < LOW_BATTERY_PCT) $("frame-status").textContent += " — time to charge it";
+  const low = pct != null && pct < LOW_BATTERY_PCT;
+  $("st-seen").textContent = info.lastSeen ? ago(info.lastSeen) : "never";
+  $("st-next").textContent = info.lastSeen ? until(info.nextCheckIn) || "–" : "–";
+  $("st-battery").textContent = pct != null ? `${pct}%` : "–";
+  $("st-gauge").style.setProperty("--pct", Math.ceil((pct ?? 0) / 10) * 10); // whole segments
+  $("st-gauge").classList.toggle("low", low);
+  $("frame-status").textContent = !info.lastSeen ? "The frame hasn't checked in yet."
+    : low ? "Battery low: time to charge it." : "";
+  $("frame-status").classList.toggle("warn", low);
 
   const hangChanged = frameInfo && frameInfo.settings.orientation !== info.settings.orientation;
   frameInfo = info;
@@ -74,13 +85,15 @@ async function loadInfo() {
   if (photos.length > 1) showBatchNote();
 }
 
-// Blob URLs for picture previews, kept across refreshes (ids never change)
+// Blob URLs for pictures, kept across refreshes (ids never change, and the browser caches the
+// files too). The grid uses small thumbnails; the picture on the frame, the full preview.
 const thumbs = new Map();
-async function thumb(picId) {
-  if (!thumbs.has(picId)) {
-    thumbs.set(picId, api(`pictures/${picId}`).then(async (r) => (r.ok ? URL.createObjectURL(await r.blob()) : "")));
+function thumb(picId, full = false) {
+  const path = full ? `pictures/${picId}` : `pictures/${picId}/thumb`;
+  if (!thumbs.has(path)) {
+    thumbs.set(path, api(path).then(async (r) => (r.ok ? URL.createObjectURL(await r.blob()) : "")));
   }
-  return thumbs.get(picId);
+  return thumbs.get(path);
 }
 
 // Up to 200 pictures: fetch previews only as they scroll into view.
@@ -104,7 +117,7 @@ function showHang(info) {
   for (const r of document.querySelectorAll("input[name=hang]")) r.checked = r.value === hang;
   // Pictures made for the other orientation would show sideways
   const panel = info.settings.panel || "7.3";
-  $("hang-label").textContent = `${panelOf(panel).name} screen · hangs`;
+  $("hang-label").textContent = `${panelOf(panel).name} screen, hangs`;
   const off = info.pictures.filter((p) => madeFor(p) !== hang || (p.panel || "7.3") !== panel);
   const fixable = off.filter((p) => p.hasOriginal);
   $("hang-mismatch").hidden = !off.length;
@@ -141,16 +154,14 @@ async function showQueue(info) {
   const pics = info.pictures;
   const current = pics.find((p) => p.id === info.current);
   if (current) {
-    $("current-img").src = await thumb(current.id);
+    $("current-img").src = await thumb(current.id, true);
     $("current-img").hidden = false;
     $("current-caption").textContent =
-      `On the frame since ${ago(info.since)}` + (current.from ? ` · from ${current.from}` : "") +
+      `since ${ago(info.since)}` + (current.from ? `, from ${current.from}` : "") +
       (current.album ? ` · ${folderName(current.album)}` : "");
   } else {
     $("current-img").hidden = true;
-    $("current-caption").textContent = pics.length
-      ? "The frame will show your picture at its next check-in."
-      : "Nothing on the frame yet.";
+    $("current-caption").textContent = pics.length ? "your picture, at the next check-in" : "nothing yet";
   }
 
   // Forget selections and views that no longer exist
@@ -427,7 +438,8 @@ function showValues() {
   }
   // The background only shows when the photo doesn't cover the whole frame
   const fit = checked("fit");
-  $("bg-seg").hidden = fit === "cover" || (fit === "auto" && !!source && effectiveFit({ fit, portrait: framePortrait() }) === "cover");
+  const covers = fit === "cover" || (fit === "auto" && !!source && effectiveFit({ fit, portrait: framePortrait() }) === "cover");
+  $("bg-seg").hidden = covers && parseFloat($("zoom").value) >= 1;
   const hang = framePortrait() ? "portrait" : "landscape";
   $("orient-note").textContent = `This frame hangs ${hang}, so every picture is made ${hang}. ` +
     `Auto fills it with photos of the same shape and fits others in whole. Change how it hangs at the top of the page.`;
@@ -470,8 +482,8 @@ function compose(o, w, h) {
   }
   const scale = (fit === "cover" ? Math.max : Math.min)(w / source.width, h / source.height) * o.zoom;
   const dw = source.width * scale, dh = source.height * scale;
-  // keep the photo covering the frame when it's bigger than it
-  const maxX = Math.max(0, (dw - w) / 2), maxY = Math.max(0, (dh - h) / 2);
+  // Bigger than the frame: keep it covering the frame. Smaller (zoomed out): keep it inside.
+  const maxX = Math.abs(dw - w) / 2, maxY = Math.abs(dh - h) / 2;
   pan.x = Math.max(-maxX, Math.min(maxX, pan.x));
   pan.y = Math.max(-maxY, Math.min(maxY, pan.y));
   const canDrag = maxX || maxY;
@@ -1141,36 +1153,50 @@ async function originalOf(p) {
   return new Promise((r) => c.toBlob(r, "image/jpeg", 0.88));
 }
 
-/** Send the photo that's in the editor: a new upload, or a replacement when editing. */
-async function uploadCurrent(queue = "next") {
-  const p = photos[cur];
-  // Big screens get a half-size preview, to keep uploads small
+/** The dithered preview scaled so its long side is at most `max` px. */
+function scaledPreview(max) {
   const pv = $("preview");
-  let pc = pv;
-  if (pv.width > 800) {
-    pc = document.createElement("canvas");
-    pc.width = pv.width / 2;
-    pc.height = pv.height / 2;
-    pc.getContext("2d").drawImage(pv, 0, 0, pc.width, pc.height);
-  }
-  const preview = await new Promise((r) => pc.toBlob(r, "image/png"));
+  const k = max / Math.max(pv.width, pv.height);
+  if (k >= 1) return pv;
+  const c = document.createElement("canvas");
+  c.width = Math.round(pv.width * k);
+  c.height = Math.round(pv.height * k);
+  const ctx = c.getContext("2d");
+  ctx.imageSmoothingQuality = "high"; // averages the ink dots back into a smooth little picture
+  ctx.drawImage(pv, 0, 0, c.width, c.height);
+  return c;
+}
+const toBlob = (canvas, type, quality) => new Promise((r) => canvas.toBlob(r, type, quality));
+
+/**
+ * Everything to send for the photo in the editor: a new upload, or a replacement when editing.
+ * Captures it all up front, so the editor can move on to the next photo while this one sends.
+ */
+async function prepareUpload(queue = "next") {
+  const p = photos[cur];
   const form = new FormData();
   form.append("image", new Blob([packed], { type: "application/octet-stream" }), "image.bin");
+  // Big screens get a half-size preview, to keep uploads small
+  const [preview, small, original] = await Promise.all([
+    toBlob(scaledPreview(800), "image/png"),
+    toBlob(scaledPreview(400), "image/jpeg", 0.85), // for the picture grid
+    originalOf(p),
+  ]);
   form.append("preview", preview, "preview.png");
-  const original = await originalOf(p);
+  if (small) form.append("thumb", small, "thumb.jpg");
   if (original) form.append("original", original, "original.jpg");
   form.append("edits", JSON.stringify(editsOf(p)));
-  let res;
-  if (p.replaces) {
-    res = await api(`pictures/${p.replaces}`, { method: "PUT", body: form });
-  } else {
-    form.append("queue", queue);
-    const album = $("upload-album").value;
-    if (album) form.append("album", album);
-    const from = $("from").value.trim();
-    if (from) form.append("from", from);
-    res = await api("image", { method: "POST", body: form });
-  }
+  if (p.replaces) return { path: `pictures/${p.replaces}`, init: { method: "PUT", body: form } };
+  form.append("queue", queue);
+  const album = $("upload-album").value;
+  if (album) form.append("album", album);
+  const from = $("from").value.trim();
+  if (from) form.append("from", from);
+  return { path: "image", init: { method: "POST", body: form } };
+}
+
+async function sendUpload({ path, init }) {
+  const res = await api(path, init);
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
 }
 
@@ -1184,7 +1210,7 @@ $("send").addEventListener("click", async () => {
       await render();
       if (!packed) return;
       msg(editing ? "Saving…" : "Sending…");
-      await uploadCurrent();
+      await sendUpload(await prepareUpload());
       msg(editing ? "Saved." : "Sent! The frame will show it at its next check-in. To change it later, select it above and press Edit.", "ok");
       clearEditor();
     }
@@ -1206,20 +1232,32 @@ async function sendBatch() {
   }
   busySending = true;
   $("editor").classList.add("sending");
-  let sent = 0, failed = 0;
+  let sent = 0, failed = 0, started = 0;
+  // While one photo uploads, the next is dithered: the two biggest waits overlap. Uploads still
+  // go one at a time, in order, so the first one is the one that goes up next.
+  let inflight = null;
+  const settle = async () => {
+    if (!inflight) return;
+    (await inflight) ? sent++ : failed++;
+    inflight = null;
+  };
+  const send = async (req) => {
+    try {
+      await sendUpload(req);
+    } catch {
+      try { await sendUpload(req); } catch { return false; } // one retry for a flaky connection
+    }
+    return true;
+  };
   try {
     for (const [n, i] of order.entries()) {
       msg(`${editing ? "Saving" : "Sending"} ${n + 1} of ${order.length}…`);
       if (!(await select(i))) { failed++; continue; }
-      const queue = sent === 0 ? "next" : "rotation";
-      try {
-        await uploadCurrent(queue);
-      } catch {
-        // one retry for a flaky connection
-        try { await uploadCurrent(queue); } catch { failed++; continue; }
-      }
-      sent++;
+      const req = await prepareUpload(started++ === 0 ? "next" : "rotation");
+      await settle();
+      inflight = send(req);
     }
+    await settle();
   } finally {
     busySending = false;
     $("editor").classList.remove("sending");
@@ -1231,6 +1269,14 @@ async function sendBatch() {
 
 
 loadInfo();
+
+// Coming back to the page (e.g. after pressing the frame's button): show the latest check-in.
+let lastInfo = Date.now();
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || busySending || Date.now() - lastInfo < 30e3) return;
+  lastInfo = Date.now();
+  loadInfo();
+});
 
 // ---- Adjustment tabs ------------------------------------------------------------
 

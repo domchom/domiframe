@@ -4,6 +4,7 @@
 //   PUT    /api/frames/:id/settings                 -> { rotateHours, checkMinutes, album, order, quiet, quietStart, quietEnd, tz }
 //
 //   GET    /api/frames/:id/pictures/:pic            -> PNG preview
+//   GET    /api/frames/:id/pictures/:pic/thumb      -> small JPEG for the picture grid (PNG preview if none)
 //   GET    /api/frames/:id/pictures/:pic/original   -> the photo as uploaded (JPEG), for editing again
 //   PUT    /api/frames/:id/pictures/:pic            -> replace with an edited version (same form as uploading)
 //   POST   /api/frames/:id/pictures/:pic/show       -> put it up at the frame's next check-in
@@ -16,7 +17,7 @@
 //   DELETE /api/frames/:id/albums/:album?pictures=delete|keep
 
 import {
-  frames, images, loadFrame, canManage, json, loadState, saveState, deletePictureFiles, frameSummary,
+  frames, images, loadFrame, canManage, json, loadState, updateState, deletePictureFiles, frameSummary,
   readPictureForm, storePicture, newPictureId, newAlbumId, PIC_ID_RE, now,
 } from "../lib/common.mjs";
 import {
@@ -47,12 +48,14 @@ export default async (req, context) => {
     case "GET info":
       return json(await frameSummary(id, frame));
     case "GET preview":
-      return file(id, (await loadState(id)).current, "png");
+      return file(id, (await loadState(id)).current, "png", "private, no-cache");
     case "PUT settings":
       return putSettings(req, id, frame);
 
     case "GET pictures :item":
       return file(id, item, "png");
+    case "GET pictures :item thumb":
+      return (await file(id, item, "thumb")) || file(id, item, "png");
     case "GET pictures :item original":
       return file(id, item, "jpg");
     case "PUT pictures :item":
@@ -89,10 +92,14 @@ export default async (req, context) => {
     }
     case "DELETE albums :item": {
       const del = new URL(req.url).searchParams.get("pictures") === "delete";
-      const state = await loadState(id);
-      if (!hasAlbum(state, item)) return json({ error: "not found" }, 404);
-      const { state: next, removed } = deleteAlbum(state, item, del);
-      await saveState(id, next);
+      let removed = [];
+      const saved = await updateState(id, (s) => {
+        if (!hasAlbum(s, item)) return null;
+        const out = deleteAlbum(s, item, del);
+        removed = out.removed;
+        return out.state;
+      });
+      if (!saved) return json({ error: "not found" }, 404);
       await deletePictureFiles(id, removed);
       if (frame.settings?.album === item) await frames().setJSON(id, { ...frame, settings: { ...frame.settings, album: null } });
       return json({ ok: true, removed: removed.length });
@@ -105,28 +112,32 @@ const has = (s, pic) => s.pictures.some((p) => p.id === pic);
 const hasAlbum = (s, album) => s.albums.some((a) => a.id === album);
 const body_ = (req) => req.json().catch(() => ({}));
 
-/** Load state, apply fn (null = not found), save. */
+/** Apply fn to the state (null = not found) and save. */
 async function change(id, fn, extra = {}) {
-  const next = fn(await loadState(id));
-  if (!next) return json({ error: "not found" }, 404);
-  await saveState(id, next);
+  if (!(await updateState(id, fn))) return json({ error: "not found" }, 404);
   return json({ ok: true, ...extra });
 }
 
 async function removeSome(id, pick) {
-  const state = await loadState(id);
-  const ids = pick(state);
+  let ids = null;
+  await updateState(id, (s) => {
+    ids = pick(s);
+    return ids && removePictures(s, ids);
+  });
   if (!ids) return json({ error: "say which pictures: ids, album or all" }, 400);
-  await saveState(id, removePictures(state, ids));
   await deletePictureFiles(id, ids);
   return json({ ok: true, removed: ids.length });
 }
 
-async function file(id, picId, ext) {
+// A picture's files never change (an edit makes a new id), so browsers can keep them.
+const IMMUTABLE = "private, max-age=31536000, immutable";
+
+/** A picture file, or a 404 (null for a missing thumbnail, so the caller can fall back). */
+async function file(id, picId, ext, cache = IMMUTABLE) {
   const data = picId && (await images().get(`${id}/${picId}.${ext}`, { type: "arrayBuffer" }));
-  if (!data) return json({ error: "not found" }, 404);
+  if (!data) return ext === "thumb" ? null : json({ error: "not found" }, 404);
   const type = ext === "png" ? "image/png" : "image/jpeg";
-  return new Response(data, { headers: { "content-type": type, "cache-control": "private, max-age=86400" } });
+  return new Response(data, { headers: { "content-type": type, "cache-control": cache } });
 }
 
 async function putSettings(req, id, frame) {
@@ -156,12 +167,10 @@ async function replace(req, id, oldId, frame) {
   if (!has(await loadState(id), oldId)) return json({ error: "not found" }, 404);
   // A new id, so cached previews of the old version don't linger
   const pic = await storePicture(id, newPictureId(), parts, panel);
-  const next = replacePicture(await loadState(id), oldId, pic);
-  if (!next) {
+  if (!(await updateState(id, (s) => replacePicture(s, oldId, pic)))) {
     await deletePictureFiles(id, [pic.id]); // deleted while we were saving
     return json({ error: "not found" }, 404);
   }
-  await saveState(id, next);
   await deletePictureFiles(id, [oldId]);
   return json({ ok: true, id: pic.id });
 }

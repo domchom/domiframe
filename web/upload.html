@@ -6,30 +6,39 @@
   <title>DomiFrame</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/brand.js"></script>
 </head>
 <body>
   <main class="wrap">
     <header class="brand">
-      <h1>DomiFrame</h1>
-      <span class="mark" aria-hidden="true"></span>
+      <a class="home-link" href="/" aria-label="DomiFrame home"><h1>DomiFrame</h1><span class="mark" aria-hidden="true"></span></a>
     </header>
     <section class="card">
       <div class="title-block">
         <p class="eyebrow">Now showing on</p>
         <h2 id="frame-name">Your frame</h2>
         <p class="meta" id="frame-status">Loading…</p>
-        <div class="hang" id="hang" role="radiogroup" aria-label="How the frame hangs" hidden>
-          <span class="eyebrow" id="hang-label">Hangs</span>
-          <label><input type="radio" name="hang" value="landscape"><span><i class="hang-icon wide"></i>Landscape</span></label>
-          <label><input type="radio" name="hang" value="portrait"><span><i class="hang-icon tall"></i>Portrait</span></label>
-        </div>
       </div>
-      <figure class="current">
-        <div class="print"><img id="current-img" alt="The picture on the frame now" hidden></div>
-        <figcaption id="current-caption">Nothing on the frame yet.</figcaption>
-      </figure>
+      <div class="now">
+        <figure class="current">
+          <div class="print"><img id="current-img" alt="The picture on the frame now" hidden></div>
+        </figure>
+        <aside class="spec" aria-label="The frame">
+          <dl>
+            <div><dt>On the frame</dt><dd id="current-caption">Nothing yet</dd></div>
+            <div><dt>Last check-in</dt><dd id="st-seen">–</dd></div>
+            <div><dt>Next check-in</dt><dd id="st-next">–</dd></div>
+            <div><dt>Battery</dt><dd><span class="gauge" id="st-gauge" aria-hidden="true"></span><span id="st-battery">–</span></dd></div>
+          </dl>
+          <div class="hang" id="hang" role="radiogroup" aria-labelledby="hang-label" hidden>
+            <span class="eyebrow" id="hang-label">Hangs</span>
+            <label><input type="radio" name="hang" value="landscape"><span><i class="hang-icon wide"></i>Landscape</span></label>
+            <label><input type="radio" name="hang" value="portrait"><span><i class="hang-icon tall"></i>Portrait</span></label>
+          </div>
+        </aside>
+      </div>
       <div id="library" hidden>
         <div class="section-head">
           <h2 class="section-title">Collection</h2>
@@ -154,9 +163,11 @@
               <label><input type="radio" name="bg" value="#000000"><span>Black</span></label>
             </div>
             <label class="slider">Zoom <output for="zoom"></output>
-              <input type="range" id="zoom" min="1" max="3" step="0.05" value="1">
+              <input type="range" id="zoom" min="0.25" max="3" step="0.05" value="1" list="zoom-marks">
+              <datalist id="zoom-marks"><option value="1"></option></datalist>
             </label>
             <button type="button" id="rotate" class="chip">↻ Rotate photo</button>
+            <p class="tip">Below 1× the photo gets smaller than the frame, with the background around it.</p>
             <p class="tip batch-only">Cropping is always set for each photo on its own.</p>
           </div>
 
@@ -263,6 +274,12 @@
         <p class="muted small" id="tz-note"></p>
         <button id="save-settings" class="primary">Save settings</button>
         <p id="settings-msg" class="msg" role="status"></p>
+        <div class="device-access" id="device-access" hidden>
+          <h3>Open this frame on another phone or computer</h3>
+          <p class="muted small">Go to <b>domiframe.art</b>, choose <b>My frame</b>, and enter:</p>
+          <dl class="spec"><div><dt>Frame ID</dt><dd id="access-id"></dd></div><div><dt>Frame code</dt><dd id="access-code"></dd></div></dl>
+          <p class="tip">Anyone with these can add and remove pictures, so share them like a house key.</p>
+        </div>
       </details>
     </section>
 
