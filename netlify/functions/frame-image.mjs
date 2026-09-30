@@ -1,12 +1,22 @@
 // /api/frames/:id/image
-//   GET  (the frame)   header X-Device-Key, optional If-None-Match, X-Battery-Mv, X-Fw
+//   GET  (the frame)   header X-Device-Key, optional If-None-Match, X-Battery-Mv, X-Fw,
+//                      X-Set-Orientation (landscape|portrait, when set on the frame)
 //        -> 200 packed image | 304 unchanged | 204 nothing uploaded yet
-//   POST (upload page) Authorization: Bearer <uploadKey>, multipart form:
+//        Every reply carries X-Sleep-Minutes (when to check in next) and X-Orientation.
+//   POST (upload page) Authorization: Bearer <uploadKey or ADMIN_TOKEN>, multipart form:
 //        image   = 192000-byte packed 4bpp palette image (800x480)
 //        preview = PNG of what the frame will show (for the upload page)
+//        from    = optional sender name
+//        album   = optional folder id
+//        original, edits = the photo and editor settings, so it can be edited again later
+//        queue   = "next" (default): goes up at the frame's next check-in
+//                  "rotation": just joins the rotation (for bulk imports)
 
-import { createHash } from "node:crypto";
-import { IMAGE_BYTES, MAX_PREVIEW_BYTES, images, status, loadFrame, keyMatches, bearer, json } from "../lib/common.mjs";
+import {
+  frames, images, status, loadFrame, keyMatches, canManage, json,
+  now, newPictureId, loadState, saveState, deletePictureFiles, readPictureForm, storePicture,
+} from "../lib/common.mjs";
+import { choosePicture, nextWakeMinutes, addPicture, mergeSettings } from "../lib/schedule.mjs";
 
 export const config = { path: "/api/frames/:id/image" };
 
@@ -24,23 +34,45 @@ async function deviceFetch(req, id, frame) {
   if (!keyMatches(frame, req.headers.get("x-device-key"), "deviceKeyHash")) {
     return json({ error: "unauthorized" }, 401);
   }
+  const t = now();
 
-  const mv = parseInt(req.headers.get("x-battery-mv") || "", 10);
-  await status().setJSON(id, {
-    lastSeen: new Date().toISOString(),
-    batteryMv: Number.isFinite(mv) && mv > 0 ? mv : null,
-    fw: (req.headers.get("x-fw") || "").slice(0, 20) || null,
-  });
-
-  const meta = await images().getMetadata(`${id}.bin`);
-  if (!meta) return new Response(null, { status: 204 });
-
-  const etag = `"${meta.metadata.etag}"`;
-  if (req.headers.get("if-none-match") === etag) {
-    return new Response(null, { status: 304, headers: { etag } });
+  // Orientation chosen on the frame itself (setup portal, or the virtual frame's switch)
+  const setHang = req.headers.get("x-set-orientation");
+  if (setHang) {
+    const { settings, error } = mergeSettings(frame.settings, { orientation: setHang });
+    if (!error && settings.orientation !== frame.settings?.orientation) {
+      frame = { ...frame, settings };
+      await frames().setJSON(id, frame);
+    }
   }
 
-  const data = await images().get(`${id}.bin`, { type: "arrayBuffer" });
+  const parsedMv = parseInt(req.headers.get("x-battery-mv") || "", 10);
+  const mv = Number.isFinite(parsedMv) && parsedMv > 0 ? parsedMv : null;
+
+  const before = await loadState(id);
+  const { state, changed } = choosePicture(before, frame.settings, t);
+  if (changed) await saveState(id, state);
+
+  const sleepMinutes = nextWakeMinutes(state, frame.settings, t, mv);
+  await status().setJSON(id, {
+    lastSeen: new Date(t).toISOString(),
+    batteryMv: mv,
+    fw: (req.headers.get("x-fw") || "").slice(0, 20) || null,
+    sleepMinutes,
+  });
+  // How the frame hangs, for the virtual frame's display (the real one just draws the bytes)
+  const sleep = { "x-sleep-minutes": String(sleepMinutes), "x-orientation": frame.settings?.orientation || "landscape" };
+
+  const pic = state.pictures.find((p) => p.id === state.current);
+  if (!pic) return new Response(null, { status: 204, headers: sleep });
+
+  const etag = `"${pic.etag}"`;
+  if (req.headers.get("if-none-match") === etag) {
+    return new Response(null, { status: 304, headers: { etag, ...sleep } });
+  }
+
+  const data = await images().get(`${id}/${pic.id}.bin`, { type: "arrayBuffer" });
+  if (!data) return json({ error: "picture missing" }, 500, sleep);
   return new Response(data, {
     status: 200,
     headers: {
@@ -48,12 +80,13 @@ async function deviceFetch(req, id, frame) {
       "content-length": String(data.byteLength),
       "cache-control": "no-store",
       etag,
+      ...sleep,
     },
   });
 }
 
 async function upload(req, id, frame) {
-  if (!keyMatches(frame, bearer(req), "uploadKeyHash")) return json({ error: "unauthorized" }, 401);
+  if (!canManage(req, frame)) return json({ error: "unauthorized" }, 401);
 
   let form;
   try {
@@ -61,24 +94,23 @@ async function upload(req, id, frame) {
   } catch {
     return json({ error: "expected multipart form data" }, 400);
   }
-  const image = form.get("image");
-  const preview = form.get("preview");
-  if (!(image instanceof Blob) || image.size !== IMAGE_BYTES) {
-    return json({ error: `image must be exactly ${IMAGE_BYTES} bytes` }, 400);
-  }
+  const { parts, error } = await readPictureForm(form);
+  if (error) return json({ error }, 400);
 
-  const bin = new Uint8Array(await image.arrayBuffer());
-  for (const b of bin) {
-    if ((b >> 4) > 5 || (b & 0x0f) > 5) return json({ error: "invalid palette index" }, 400);
-  }
+  let state = await loadState(id);
+  const album = String(form.get("album") || "") || null;
+  if (album && !state.albums.some((a) => a.id === album)) return json({ error: "no such folder" }, 400);
 
-  const etag = createHash("sha256").update(bin).digest("hex").slice(0, 16);
-  const uploadedAt = new Date().toISOString();
-  await images().set(`${id}.bin`, bin.buffer, { metadata: { etag, uploadedAt } });
+  const pic = await storePicture(id, newPictureId(), parts);
+  pic.album = album;
+  pic.from = String(form.get("from") || "").trim().slice(0, 40) || null;
 
-  if (preview instanceof Blob && preview.size > 0 && preview.size <= MAX_PREVIEW_BYTES) {
-    await images().set(`${id}.png`, await preview.arrayBuffer(), { metadata: { etag, uploadedAt } });
-  }
+  let removed;
+  ({ state, removed } = addPicture(state, pic));
+  // Marking it seen keeps it from jumping the queue; it comes round with the rotation.
+  if (form.get("queue") === "rotation") state.seen.push(pic.id);
+  await saveState(id, state);
+  if (removed.length) await deletePictureFiles(id, removed);
 
-  return json({ ok: true, etag, uploadedAt });
+  return json({ ok: true, id: pic.id, etag: pic.etag, uploadedAt: pic.uploadedAt });
 }

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { BlobsServer } from "@netlify/blobs/server";
 import { setEnvironmentContext } from "@netlify/blobs";
 
-import { ditherToPalette, rotatePortraitToPanel, pack, PANEL_W, PANEL_H } from "../web/dither.js";
+import { ditherToPalette, adjust, DITHER_METHODS, rotatePortraitToPanel, pack, PANEL_W, PANEL_H } from "../web/dither.js";
 
 const ADMIN = "test-admin-token";
 let server, dir, admin, frameImage, frameInfo;
@@ -53,6 +53,46 @@ test("solid white and black map to the white and black inks", () => {
   assert.equal(ditherToPalette(px(0, 0, 0), 1, 1, { saturation: 1, contrast: 1 })[0], 0);
 });
 
+test("color balance, shadows and sharpen move pixels the right way", () => {
+  const grey = new Uint8ClampedArray([128, 128, 128, 255]);
+  const neutral = { saturation: 1, contrast: 1 };
+  const [r0, g0, b0] = adjust(grey, 1, 1, neutral);
+  const [rw, , bw] = adjust(grey, 1, 1, { ...neutral, temperature: 1 });
+  assert.ok(rw > r0 && bw < b0, "warm raises red, lowers blue");
+  const [, gm] = adjust(grey, 1, 1, { ...neutral, tint: 1 });
+  assert.ok(gm < g0, "magenta tint lowers green");
+  assert.ok(adjust(grey, 1, 1, { ...neutral, shadows: 1 })[0] > r0, "lifting shadows brightens mid-grey");
+  assert.ok(adjust(grey, 1, 1, { ...neutral, shadows: -1 })[0] < r0);
+
+  // a dark dot on white gets darker with sharpening
+  const w = 3, rgba = new Uint8ClampedArray(w * w * 4).fill(255);
+  rgba.set([100, 100, 100], 4 * 4);
+  assert.ok(adjust(rgba, w, w, { ...neutral, sharpen: 1 })[4 * 3] < 100);
+});
+
+test("color boost 0 uses only the black and white inks", () => {
+  const w = 32, h = 32, rgba = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) rgba.set([200, 60, 40, 255], i * 4); // a red
+  const idx = ditherToPalette(rgba, w, h, { saturation: 0 });
+  assert.ok(idx.every((v) => v === 0 || v === 1));
+});
+
+test("every dither mode returns valid palette indices", () => {
+  const w = 64, h = 32, rgba = new Uint8ClampedArray(w * h * 4);
+  for (let i = 0; i < w * h; i++) rgba.set([(i * 7) % 256, (i * 3) % 256, (i * 11) % 256, 255], i * 4);
+  for (const dither of DITHER_METHODS) {
+    const idx = ditherToPalette(rgba, w, h, { dither, strength: 0.7, sharpen: 0.5 });
+    assert.ok(idx.every((v) => v <= 5), dither);
+  }
+  // with no dithering, a flat mid-grey maps to a single ink
+  const flat = new Uint8ClampedArray(w * h * 4).fill(140);
+  assert.equal(new Set(ditherToPalette(flat, w, h, { dither: "none" })).size, 1);
+  // ordered dithering mixes inks for the same grey, in a repeating 8x8 pattern
+  const bayer = ditherToPalette(flat, w, h, { dither: "bayer" });
+  assert.ok(new Set(bayer).size > 1);
+  assert.equal(bayer[0], bayer[8]);
+});
+
 test("portrait rotation maps corners correctly", () => {
   const p = new Uint8Array(PANEL_H * PANEL_W); // 480 wide x 800 tall
   p[0] = 2;                        // portrait top-left
@@ -62,69 +102,215 @@ test("portrait rotation maps corners correctly", () => {
   assert.equal(r[(PANEL_H - 1) * PANEL_W], 3); // panel bottom-left
 });
 
-test("full flow: create frame, upload, device fetch with ETag", async () => {
-  // admin auth
-  let res = await admin(new Request(url("/api/admin/frames"), { method: "GET" }));
-  assert.equal(res.status, 401);
+test("full flow: create frame, queue pictures, rotate, settings, admin", async () => {
+  const adminReq = (path, init = {}) =>
+    admin(new Request(url(path), { ...init, headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json", ...init.headers } }),
+      { params: path.match(/frames\/([^/]+)/) ? { id: path.match(/frames\/([^/]+)/)[1] } : {} });
 
-  res = await admin(new Request(url("/api/admin/frames"), {
-    method: "POST",
-    headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
-    body: JSON.stringify({ id: "emma", name: "Emma's frame" }),
-  }));
+  // admin auth
+  assert.equal((await admin(new Request(url("/api/admin/frames")), { params: {} })).status, 401);
+
+  let res = await adminReq("/api/admin/frames", { method: "POST", body: JSON.stringify({ id: "emma", name: "Emma's frame" }) });
   assert.equal(res.status, 201);
   const { uploadKey, deviceKey, uploadLink } = await res.json();
   assert.match(uploadLink, /\/f\/emma#k=/);
 
   const ctx = { params: { id: "emma" } };
-  const dev = (extra = {}) =>
-    frameImage(new Request(url("/api/frames/emma/image"), { headers: { "x-device-key": deviceKey, "x-battery-mv": "3900", ...extra } }), ctx);
+  const dev = (extra = {}, key = deviceKey) =>
+    frameImage(new Request(url("/api/frames/emma/image"), { headers: { "x-device-key": key, "x-battery-mv": "3900", ...extra } }), ctx);
+  const manage = (path, init = {}, key = uploadKey) => {
+    const [, pic] = path.match(/pictures\/([^/]+)/) || [];
+    return frameInfo(new Request(url(`/api/frames/emma/${path}`), { ...init, headers: { authorization: `Bearer ${key}`, ...init.headers } }),
+      { params: pic ? { id: "emma", pic } : { id: "emma" } });
+  };
 
-  // nothing uploaded yet
-  assert.equal((await dev()).status, 204);
-  // wrong device key
-  assert.equal((await frameImage(new Request(url("/api/frames/emma/image"), { headers: { "x-device-key": "nope" } }), ctx)).status, 401);
+  // nothing uploaded yet; every device reply says when to wake
+  res = await dev();
+  assert.equal(res.status, 204);
+  assert.equal(res.headers.get("x-sleep-minutes"), "60");
+  assert.equal(res.headers.get("x-orientation"), "landscape");
+  // the frame can say how it hangs; the server remembers it
+  res = await dev({ "x-set-orientation": "portrait" });
+  assert.equal(res.headers.get("x-orientation"), "portrait");
+  assert.equal((await dev({ "x-set-orientation": "sideways" })).headers.get("x-orientation"), "portrait", "bad values are ignored");
+  assert.equal((await dev({ "x-set-orientation": "landscape" })).headers.get("x-orientation"), "landscape");
+  assert.equal((await dev({}, "nope")).status, 401);
 
-  // upload with wrong key / wrong size
-  const good = new Uint8Array(192000).fill(0x11);
-  const form = (bytes) => {
+  // uploads: wrong key, wrong size, bad palette index, then two good ones
+  const form = (fill, from) => {
     const f = new FormData();
-    f.append("image", new Blob([bytes]), "image.bin");
-    f.append("preview", new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" }), "p.png");
+    f.append("image", new Blob([new Uint8Array(192000).fill(fill)]), "image.bin");
+    f.append("preview", new Blob([new Uint8Array([137, 80, 78, 71, fill])], { type: "image/png" }), "p.png");
+    if (from) f.append("from", from);
     return f;
   };
-  const post = (key, bytes) =>
-    frameImage(new Request(url("/api/frames/emma/image"), { method: "POST", headers: { authorization: `Bearer ${key}` }, body: form(bytes) }), ctx);
+  const post = (key, body) =>
+    frameImage(new Request(url("/api/frames/emma/image"), { method: "POST", headers: { authorization: `Bearer ${key}` }, body }), ctx);
+  assert.equal((await post("wrong", form(0x11))).status, 401);
+  const short = new FormData();
+  short.append("image", new Blob([new Uint8Array(10)]));
+  assert.equal((await post(uploadKey, short)).status, 400);
+  assert.equal((await post(uploadKey, form(0x77))).status, 400); // index 7 invalid
+  const first = await (await post(uploadKey, form(0x11, "Mom"))).json();
+  const second = await (await post(uploadKey, form(0x22, "Dad"))).json();
 
-  assert.equal((await post("wrong", good)).status, 401);
-  assert.equal((await post(uploadKey, new Uint8Array(10))).status, 400);
-  assert.equal((await post(uploadKey, new Uint8Array(192000).fill(0x77))).status, 400); // index 7 invalid
-  res = await post(uploadKey, good);
-  assert.equal(res.status, 200);
-
-  // device downloads, then gets 304 with the ETag
+  // the frame gets the first, then the second (new pictures each get a turn), then 304
   res = await dev();
   assert.equal(res.status, 200);
-  const etag = res.headers.get("etag");
-  assert.equal((await res.arrayBuffer()).byteLength, 192000);
-  assert.equal((await dev({ "if-none-match": etag })).status, 304);
+  assert.equal(new Uint8Array(await res.arrayBuffer())[0], 0x11);
+  const etag1 = res.headers.get("etag");
+  res = await dev({ "if-none-match": etag1 });
+  assert.equal(res.status, 200);
+  assert.equal(new Uint8Array(await res.arrayBuffer())[0], 0x22);
+  const etag2 = res.headers.get("etag");
+  assert.equal((await dev({ "if-none-match": etag2 })).status, 304);
 
-  // info shows battery + last seen
-  res = await frameInfo(new Request(url("/api/frames/emma/info"), { headers: { authorization: `Bearer ${uploadKey}` } }), ctx);
-  const info = await res.json();
+  // rotate hourly: an hour later it wraps back to the first picture
+  res = await manage("settings", { method: "PUT", body: JSON.stringify({ rotateHours: 1 }) });
+  assert.equal(res.status, 200);
+  assert.equal((await manage("settings", { method: "PUT", body: JSON.stringify({ rotateHours: 5 }) })).status, 400);
+  res = await dev({ "if-none-match": etag2 });
+  assert.equal(res.status, 304);
+  assert.ok(Number(res.headers.get("x-sleep-minutes")) <= 60);
+  globalThis.__domiframeClockOffset = 61 * 60e3;
+  res = await dev({ "if-none-match": etag2 });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("etag"), etag1);
+  globalThis.__domiframeClockOffset = 0;
+
+  // info: queue, sender names, battery, next check-in
+  let info = await (await manage("info")).json();
   assert.equal(info.name, "Emma's frame");
   assert.equal(info.batteryMv, 3900);
-  assert.ok(info.lastSeen && info.imageUploadedAt);
+  assert.equal(info.settings.rotateHours, 1);
+  assert.deepEqual(info.pictures.map((p) => p.from), ["Mom", "Dad"]);
+  assert.equal(info.current, first.id);
+  assert.ok(info.lastSeen && info.nextCheckIn);
 
-  // preview
-  res = await frameInfo(new Request(url("/api/frames/emma/preview"), { headers: { authorization: `Bearer ${uploadKey}` } }), ctx);
-  assert.equal(res.status, 200);
+  // previews: current and per picture
+  res = await manage("preview");
   assert.equal(res.headers.get("content-type"), "image/png");
+  assert.equal(new Uint8Array(await res.arrayBuffer())[4], 0x11);
+  assert.equal(new Uint8Array(await (await manage(`pictures/${second.id}`)).arrayBuffer())[4], 0x22);
 
-  // admin list
-  res = await admin(new Request(url("/api/admin/frames"), { headers: { authorization: `Bearer ${ADMIN}` } }));
+  // delete the picture on the frame: the frame moves to the other one
+  assert.equal((await manage(`pictures/${first.id}`, { method: "DELETE" })).status, 200);
+  assert.equal((await manage(`pictures/${first.id}`)).status, 404);
+  res = await dev({ "if-none-match": etag1 });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("etag"), etag2);
+
+  // a bulk import joins the rotation instead of jumping the queue
+  const bulk = form(0x33);
+  bulk.append("queue", "rotation");
+  const imported = await (await post(uploadKey, bulk)).json();
+  assert.equal((await dev({ "if-none-match": etag2 })).status, 304);
+  info = await (await manage("info")).json();
+  assert.ok(info.pictures.find((p) => p.id === imported.id).seen);
+
+  // admin can manage too; list shows the frame without key hashes
+  assert.equal((await manage("info", {}, ADMIN)).status, 200);
+  res = await adminReq("/api/admin/frames");
   const { frames } = await res.json();
   assert.equal(frames.length, 1);
-  assert.equal(frames[0].id, "emma");
-  assert.ok(!("uploadKeyHash" in frames[0]));
+  assert.equal(frames[0].pictures.length, 2);
+  assert.ok(!JSON.stringify(frames).includes("KeyHash"));
+
+  // new upload key: old link stops working
+  res = await adminReq("/api/admin/frames/emma/keys", { method: "POST", body: JSON.stringify({ key: "upload" }) });
+  const { uploadKey: newUploadKey } = await res.json();
+  assert.equal((await manage("info")).status, 404);
+  assert.equal((await manage("info", {}, newUploadKey)).status, 200);
+
+  // delete the frame
+  assert.equal((await adminReq("/api/admin/frames/emma", { method: "DELETE" })).status, 200);
+  assert.equal((await dev()).status, 404);
+});
+
+test("folders, show next, replace, bulk move and delete", async () => {
+  let res = await admin(new Request(url("/api/admin/frames"), {
+    method: "POST",
+    headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
+    body: JSON.stringify({ id: "gran", name: "Gran" }),
+  }), { params: {} });
+  const { uploadKey, deviceKey } = await res.json();
+  const ctx = { params: { id: "gran" } };
+  const call = (path, init = {}) =>
+    frameInfo(new Request(url(`/api/frames/gran/${path}`), {
+      ...init,
+      headers: { authorization: `Bearer ${uploadKey}`, ...(typeof init.body === "string" ? { "content-type": "application/json" } : {}), ...init.headers },
+    }), ctx);
+  const jsonBody = (method, body) => ({ method, body: JSON.stringify(body) });
+  const form = (fill, extra = {}) => {
+    const f = new FormData();
+    f.append("image", new Blob([new Uint8Array(192000).fill(fill)]));
+    f.append("preview", new Blob([new Uint8Array([137, fill])], { type: "image/png" }));
+    f.append("original", new Blob([new Uint8Array([255, 216, fill])], { type: "image/jpeg" }));
+    f.append("edits", JSON.stringify({ zoom: 1.5 }));
+    for (const [k, v] of Object.entries(extra)) f.append(k, v);
+    return f;
+  };
+  const upload = async (fill, extra) =>
+    (await (await frameImage(new Request(url("/api/frames/gran/image"), { method: "POST", headers: { authorization: `Bearer ${uploadKey}` }, body: form(fill, extra) }), ctx)).json());
+  const dev = (etag) =>
+    frameImage(new Request(url("/api/frames/gran/image"), { headers: { "x-device-key": deviceKey, ...(etag ? { "if-none-match": etag } : {}) } }), ctx);
+  const info = async () => (await call("info")).json();
+
+  // folders
+  const { album: beach } = await (await call("albums", jsonBody("POST", { name: "Beach" }))).json();
+  assert.equal((await call("albums", jsonBody("POST", { name: "  " }))).status, 400);
+  assert.equal((await upload(0x11, { album: "nope000000" })).error, "no such folder");
+  const a = await upload(0x11, { album: beach.id });
+  const b = await upload(0x22);
+  const c = await upload(0x33, { album: beach.id, queue: "rotation" });
+
+  // original and edits are kept for editing later
+  res = await call(`pictures/${a.id}/original`);
+  assert.equal(res.headers.get("content-type"), "image/jpeg");
+  let i = await info();
+  assert.deepEqual(i.pictures[0].edits, { zoom: 1.5 });
+  assert.equal(i.pictures[0].hasOriginal, true);
+  assert.deepEqual(i.albums.map((x) => [x.name, x.count]), [["Beach", 2]]);
+
+  // cycle only through Beach: the frame gets a, never b
+  assert.equal((await call("settings", jsonBody("PUT", { album: beach.id, rotateHours: 1 }))).status, 200);
+  assert.equal((await call("settings", jsonBody("PUT", { album: "abcdef0000" }))).status, 400);
+  res = await dev();
+  assert.equal(new Uint8Array(await res.arrayBuffer())[0], 0x11);
+  let etag = res.headers.get("etag");
+
+  // show next: b (outside the folder) goes up at the next check-in
+  assert.equal((await call(`pictures/${b.id}/show`, { method: "POST" })).status, 200);
+  res = await dev(etag);
+  assert.equal(new Uint8Array(await res.arrayBuffer())[0], 0x22);
+  etag = res.headers.get("etag");
+
+  // replace b while it's up: the frame redraws with the new version; place and sender kept
+  const edited = new FormData();
+  edited.append("image", new Blob([new Uint8Array(192000).fill(0x44)]));
+  res = await frameInfo(new Request(url(`/api/frames/gran/pictures/${b.id}`), { method: "PUT", headers: { authorization: `Bearer ${uploadKey}` }, body: edited }), ctx);
+  const { id: b2 } = await res.json();
+  i = await info();
+  assert.deepEqual(i.pictures.map((p) => p.id), [a.id, b2, c.id]);
+  assert.equal(i.current, b2);
+  assert.equal((await call(`pictures/${b.id}`)).status, 404, "old version gone");
+  res = await dev(etag);
+  assert.equal(res.status, 200);
+  assert.equal(new Uint8Array(await res.arrayBuffer())[0], 0x44);
+
+  // bulk move, then delete a folder but keep its pictures
+  assert.equal((await call("pictures", jsonBody("PATCH", { ids: [b2], album: beach.id }))).status, 200);
+  assert.equal((await info()).albums[0].count, 3);
+  assert.equal((await call(`albums/${beach.id}?pictures=keep`, { method: "DELETE" })).status, 200);
+  i = await info();
+  assert.equal(i.albums.length, 0);
+  assert.equal(i.settings.album, null, "frame goes back to all pictures");
+  assert.ok(i.pictures.every((p) => p.album === null));
+
+  // bulk delete: needs an explicit choice
+  assert.equal((await call("pictures", jsonBody("DELETE", {}))).status, 400);
+  assert.equal((await (await call("pictures", jsonBody("DELETE", { ids: [a.id] }))).json()).removed, 1);
+  assert.equal((await (await call("pictures", jsonBody("DELETE", { all: true }))).json()).removed, 2);
+  assert.equal((await info()).pictures.length, 0);
+  assert.equal((await dev()).status, 204);
 });
