@@ -2,10 +2,14 @@
 
 // ---- Server ---------------------------------------------------------------
 #define SERVER_BASE "https://domiframe.com"
-#define FW_VERSION "0.1.0"
+#define FW_VERSION "0.3.0"
 
-// How often the frame wakes to check for a new picture.
+// How often the frame wakes to check for a new picture when the server doesn't say
+// (offline, or an old server). Normally the server sends X-Sleep-Minutes, set per frame on
+// the upload/admin pages, clamped to this range.
 #define SLEEP_MINUTES 60
+#define MIN_SLEEP_MINUTES 5
+#define MAX_SLEEP_MINUTES (7 * 24 * 60)
 
 // ---- XIAO ePaper Display Board EE04 (XIAO ESP32-S3 Plus) --------------------
 // From Seeed_GFX User_Setups/EPaper_Board_Pins_Setups.h (USE_XIAO_EPAPER_DISPLAY_BOARD_EE04)

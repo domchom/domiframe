@@ -1,7 +1,8 @@
 // DomiFrame firmware for XIAO ePaper Display Board EE04 + 7.3" E Ink Spectra 6 (800x480).
 //
 // Each wake: connect to Wi-Fi -> GET /api/frames/<id>/image (with ETag) ->
-// redraw only if the picture changed -> deep sleep.
+// redraw only if the picture changed -> deep sleep for as long as the server says
+// (X-Sleep-Minutes), so check-in times, quiet hours and picture rotation are set on the server.
 //
 // First boot (or hold KEY3 while resetting): opens a Wi-Fi setup portal
 // "DomiFrame-Setup" where you enter the home Wi-Fi plus the frame ID and device key.
@@ -17,7 +18,6 @@
 #include <Fonts/FreeSansBold18pt7b.h>
 #include <Fonts/FreeSans12pt7b.h>
 #include <driver/rtc_io.h>
-#include <esp_idf_version.h>
 #include "config.h"
 
 static const int W = 800, H = 480;
@@ -32,6 +32,12 @@ GxEPD2_7C<GxEPD2_730c_GDEP073E01, GxEPD2_730c_GDEP073E01::HEIGHT / 4>
 
 Preferences prefs;
 String frameId, deviceKey, etag;
+uint32_t sleepMinutes = SLEEP_MINUTES;  // replaced by the server's X-Sleep-Minutes
+// How the frame hangs: "landscape" or "portrait". Chosen in the setup portal (sent to the server
+// until it confirms), otherwise whatever the server says (set on the website). Pictures arrive
+// already turned for it; this only decides which way up our own messages are drawn.
+String orientation = "landscape";
+bool orientationPending = false;
 
 // ---------------------------------------------------------------------------
 
@@ -48,6 +54,7 @@ void showMessage(const char* title, const char* line1, const char* line2 = nullp
   display.setFullWindow();
   display.firstPage();
   do {
+    display.setRotation(orientation == "portrait" ? 1 : 0);  // upright on a portrait-hung frame
     display.fillScreen(GxEPD_WHITE);
     display.setTextColor(GxEPD_BLACK);
     display.setFont(&FreeSansBold18pt7b);
@@ -69,7 +76,7 @@ void showMessage(const char* title, const char* line1, const char* line2 = nullp
 }
 
 void drawPacked(const uint8_t* buf) {
-  displayBegin();
+  displayBegin();  // rotation 0: the picture's bytes are already in panel order
   display.setFullWindow();
   display.firstPage();
   do {
@@ -103,6 +110,8 @@ void loadSettings() {
   frameId = prefs.getString("id", "");
   deviceKey = prefs.getString("key", "");
   etag = prefs.getString("etag", "");
+  orientation = prefs.getString("orient", "landscape");
+  orientationPending = prefs.getBool("orientSet", false);
   prefs.end();
 }
 
@@ -112,15 +121,32 @@ void saveString(const char* k, const String& v) {
   prefs.end();
 }
 
+void saveOrientationPending(bool pending) {
+  orientationPending = pending;
+  prefs.begin("domiframe", false);
+  prefs.putBool("orientSet", pending);
+  prefs.end();
+}
+
 bool runSetupPortal() {
-  showMessage("Wi-Fi setup", "On your phone, join Wi-Fi \"" SETUP_AP_NAME "\"",
-              "then pick your home network.");
+  showMessage("Wi-Fi setup", "On your phone, join the Wi-Fi",
+              "\"" SETUP_AP_NAME "\" to set me up.");
 
   WiFiManager wm;
   WiFiManagerParameter pId("id", "Frame ID", frameId.c_str(), 32);
   WiFiManagerParameter pKey("key", "Device key", deviceKey.c_str(), 64);
+  // WiFiManager only has text fields: a hidden one holds the value, a dropdown fills it in.
+  WiFiManagerParameter pOrient("orient", "", orientation.c_str(), 10, "type='hidden'");
+  bool portrait = orientation == "portrait";
+  String pickHtml = String("<br><label for='orientPick'>How the frame hangs</label>"
+                           "<select id='orientPick' onchange=\"document.getElementById('orient').value=this.value\">"
+                           "<option value='landscape'") + (portrait ? "" : " selected") + ">Landscape (wide)</option>"
+                           "<option value='portrait'" + (portrait ? " selected" : "") + ">Portrait (tall)</option></select>";
+  WiFiManagerParameter pOrientPick(pickHtml.c_str());
   wm.addParameter(&pId);
   wm.addParameter(&pKey);
+  wm.addParameter(&pOrientPick);
+  wm.addParameter(&pOrient);
   wm.setConfigPortalTimeout(SETUP_PORTAL_TIMEOUT_S);
   wm.setBreakAfterConfig(true);
 
@@ -132,6 +158,12 @@ bool runSetupPortal() {
   if (strlen(pKey.getValue())) {
     deviceKey = pKey.getValue();
     saveString("key", deviceKey);
+  }
+  String o = pOrient.getValue();
+  if (o == "landscape" || o == "portrait") {
+    orientation = o;
+    saveString("orient", orientation);
+    saveOrientationPending(true);  // tell the server at the next check-in
   }
   // force a redraw after setup
   etag = "";
@@ -161,11 +193,24 @@ bool fetchAndDraw(int batteryMv) {
   http.addHeader("X-Battery-Mv", String(batteryMv));
   http.addHeader("X-Fw", FW_VERSION);
   if (etag.length()) http.addHeader("If-None-Match", etag);
-  const char* keep[] = {"ETag"};
-  http.collectHeaders(keep, 1);
+  if (orientationPending) http.addHeader("X-Set-Orientation", orientation);
+  const char* keep[] = {"ETag", "X-Sleep-Minutes", "X-Orientation"};
+  http.collectHeaders(keep, 3);
 
   int code = http.GET();
   Serial.printf("GET %s -> %d\n", url.c_str(), code);
+
+  long mins = http.header("X-Sleep-Minutes").toInt();  // 0 if missing
+  if (mins >= MIN_SLEEP_MINUTES && mins <= MAX_SLEEP_MINUTES) sleepMinutes = (uint32_t)mins;
+
+  if (code == 200 || code == 204 || code == 304) {
+    if (orientationPending) saveOrientationPending(false);  // the server has it now
+    String o = http.header("X-Orientation");
+    if ((o == "landscape" || o == "portrait") && o != orientation) {
+      orientation = o;  // changed on the website
+      saveString("orient", orientation);
+    }
+  }
 
   if (code == 401 || code == 404) {
     http.end();
@@ -227,16 +272,12 @@ void goToSleep() {
   WiFi.mode(WIFI_OFF);
   digitalWrite(EPD_ENABLE, LOW);
 
-  esp_sleep_enable_timer_wakeup((uint64_t)SLEEP_MINUTES * 60ULL * 1000000ULL);
+  esp_sleep_enable_timer_wakeup((uint64_t)sleepMinutes * 60ULL * 1000000ULL);
   rtc_gpio_pullup_en((gpio_num_t)BTN_REFRESH);
   rtc_gpio_pulldown_dis((gpio_num_t)BTN_REFRESH);
-#if ESP_IDF_VERSION_MAJOR >= 5
-  esp_sleep_enable_ext1_wakeup(1ULL << BTN_REFRESH, ESP_EXT1_WAKEUP_ANY_LOW);
-#else
-  esp_sleep_enable_ext1_wakeup(1ULL << BTN_REFRESH, ESP_EXT1_WAKEUP_ALL_LOW);  // single pin: same as any-low
-#endif
+  esp_sleep_enable_ext1_wakeup(1ULL << BTN_REFRESH, ESP_EXT1_WAKEUP_ANY_LOW);  // ESP32-S3: any IDF version
 
-  Serial.println("sleeping");
+  Serial.printf("sleeping %u min\n", (unsigned)sleepMinutes);
   Serial.flush();
   esp_deep_sleep_start();
 }
