@@ -4,58 +4,269 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DomiFrame</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <main class="wrap">
     <header class="brand">
-      <span class="mark" aria-hidden="true"></span>
       <h1>DomiFrame</h1>
+      <span class="mark" aria-hidden="true"></span>
     </header>
     <section class="card">
-      <h2 id="frame-name">Your frame</h2>
-      <p class="muted" id="frame-status">Loading…</p>
+      <div class="title-block">
+        <p class="eyebrow">Now showing on</p>
+        <h2 id="frame-name">Your frame</h2>
+        <p class="meta" id="frame-status">Loading…</p>
+        <div class="hang" id="hang" role="radiogroup" aria-label="How the frame hangs" hidden>
+          <span class="eyebrow">Hangs</span>
+          <label><input type="radio" name="hang" value="landscape"><span><i class="hang-icon wide"></i>Landscape</span></label>
+          <label><input type="radio" name="hang" value="portrait"><span><i class="hang-icon tall"></i>Portrait</span></label>
+        </div>
+      </div>
       <figure class="current">
-        <img id="current-img" alt="" hidden>
-        <figcaption class="muted" id="current-caption">Nothing on the frame yet.</figcaption>
+        <div class="print"><img id="current-img" alt="The picture on the frame now" hidden></div>
+        <figcaption id="current-caption">Nothing on the frame yet.</figcaption>
       </figure>
+      <div id="library" hidden>
+        <div class="section-head">
+          <h2 class="section-title">Collection</h2>
+          <p class="meta" id="queue-title"></p>
+        </div>
+        <div class="cycle">
+          <label class="slider">The frame shows
+            <select id="cycle-album"></select>
+          </label>
+          <label class="check"><input type="checkbox" id="cycle-shuffle"> Shuffle</label>
+        </div>
+        <div class="chips folders" id="folders" role="tablist" aria-label="Folders"></div>
+        <div class="folder-actions" id="folder-actions" hidden>
+          <button type="button" class="link" id="rename-folder">Rename folder</button>
+          <button type="button" class="link" id="delete-folder">Delete folder</button>
+        </div>
+        <div class="bulkbar">
+          <span id="sel-count" class="small muted">Tap pictures to select them.</span>
+          <button type="button" class="chip" id="sel-all">Select all</button>
+          <button type="button" class="chip" id="sel-none" hidden>Clear selection</button>
+          <button type="button" class="chip" id="sel-show" hidden>Show next</button>
+          <button type="button" class="chip" id="sel-edit" hidden>Edit</button>
+          <select id="sel-move" class="chip" hidden aria-label="Move selected pictures to a folder"></select>
+          <button type="button" class="chip danger" id="sel-remove" hidden>Remove</button>
+          <button type="button" class="chip danger" id="remove-all">Remove all</button>
+        </div>
+        <p class="hang-mismatch" id="hang-mismatch" hidden>
+          <span id="hang-mismatch-text"></span>
+          <button type="button" class="link" id="hang-rebuild">Rebuild them</button>
+        </p>
+        <ul id="queue" class="queue"></ul>
+        <p class="muted small" id="queue-empty" hidden>Nothing in this folder yet. Add pictures below, or select some and move them here.</p>
+      </div>
     </section>
 
     <section class="card">
-      <h2>New picture</h2>
-      <label class="picker">
-        <input type="file" id="file" accept="image/*">
-        <span>Choose a photo</span>
-      </label>
+      <div class="section-head">
+        <h2 class="section-title">Add pictures</h2>
+        <p class="meta">Photos are turned into the frame's six inks right here, before sending.</p>
+      </div>
+      <div class="pickers">
+        <label class="picker">
+          <input type="file" id="file" accept="image/*" multiple>
+          <span><em>Choose photos</em><small>one or many</small></span>
+        </label>
+        <label class="picker" id="folder-picker">
+          <input type="file" id="folder" webkitdirectory multiple>
+          <span><em>Choose a folder</em><small>everything inside it</small></span>
+        </label>
+      </div>
 
       <div id="editor" hidden>
-        <div class="row">
-          <div class="seg" role="radiogroup" aria-label="Orientation">
-            <label><input type="radio" name="orient" value="landscape" checked><span>Landscape</span></label>
-            <label><input type="radio" name="orient" value="portrait"><span>Portrait</span></label>
+        <div class="stage">
+          <div class="editor-head">
+            <span id="batch-count"></span>
+            <button type="button" class="link" id="clear-photos">Clear</button>
           </div>
-          <div class="seg" role="radiogroup" aria-label="Fit">
-            <label><input type="radio" name="fit" value="cover" checked><span>Fill</span></label>
-            <label><input type="radio" name="fit" value="contain"><span>Fit</span></label>
+          <p class="edit-banner" id="edit-banner" hidden></p>
+          <div class="print"><canvas id="preview" class="preview" aria-label="Preview of how it will look on the frame"></canvas></div>
+          <p class="hint"><span id="drag-hint">Drag to reposition</span>
+            <button type="button" id="compare" class="link">Hold to see original</button></p>
+          <div class="filmstrip batch-only">
+            <button type="button" id="prev" class="arrow" aria-label="Previous photo">‹</button>
+            <div id="strip" class="strip" aria-label="Photos to send"></div>
+            <button type="button" id="next" class="arrow" aria-label="Next photo">›</button>
           </div>
+          <p class="strip-pos batch-only"><span id="strip-pos"></span><span class="keys-tip">← → to move between photos · × leaves one out</span></p>
         </div>
 
-        <label class="slider">Color boost
-          <input type="range" id="saturation" min="0.6" max="2" step="0.05" value="1.3">
-        </label>
-        <label class="slider">Brightness
-          <input type="range" id="brightness" min="0.7" max="1.4" step="0.05" value="1.05">
-        </label>
+        <div class="controls">
+          <div class="batch-only batch-box">
+            <p id="batch-note"></p>
+            <label class="check"><input type="checkbox" id="shuffle"> Shuffle the order</label>
+          </div>
 
-        <p class="muted small">Preview of how it will look on the frame:</p>
-        <canvas id="preview" class="preview"></canvas>
+          <div class="scope batch-only">
+            <h3 id="scope-title">Changes apply to</h3>
+            <div class="scope-seg" role="radiogroup" aria-labelledby="scope-title">
+              <label>
+                <input type="radio" name="scope" value="all" checked>
+                <span><b id="scope-all-label">All photos</b><small>edit the set together</small></span>
+              </label>
+              <label>
+                <input type="radio" name="scope" value="this">
+                <span><b>Just this photo</b><small id="scope-this-label">only this one</small></span>
+              </label>
+            </div>
+            <p class="look-diff" id="look-diff" hidden>
+              <span id="look-diff-text">This photo looks different from the others.</span>
+              <button type="button" class="link" id="look-match">Match the others</button>
+              <button type="button" class="link" id="look-all">Use this look for all</button>
+            </p>
+          </div>
 
-        <button id="send" class="primary">Send to frame</button>
+          <div class="adjust" id="adjust">
+          <div class="section-head compact"><h3>Look</h3></div>
+          <div class="presets" id="presets">
+            <button type="button" data-preset="default"><i class="sw sw-default"></i>Default</button>
+            <button type="button" data-preset="natural"><i class="sw sw-natural"></i>Natural</button>
+            <button type="button" data-preset="vivid"><i class="sw sw-vivid"></i>Vivid</button>
+            <button type="button" data-preset="soft"><i class="sw sw-soft"></i>Soft</button>
+            <button type="button" data-preset="mono"><i class="sw sw-mono"></i>B&amp;W</button>
+          </div>
+
+          <div class="tabs" role="tablist" aria-label="Adjustments">
+            <button type="button" role="tab" data-tab="frame">Crop</button>
+            <button type="button" role="tab" data-tab="light">Light</button>
+            <button type="button" role="tab" data-tab="color">Color</button>
+            <button type="button" role="tab" data-tab="detail">Detail</button>
+          </div>
+
+          <div class="panel" data-panel="frame" role="tabpanel">
+            <p class="tip orient-note" id="orient-note"></p>
+            <div class="seg" role="radiogroup" aria-label="Fit">
+              <label><input type="radio" name="fit" value="auto" checked><span>Auto</span></label>
+              <label><input type="radio" name="fit" value="cover"><span>Fill</span></label>
+              <label><input type="radio" name="fit" value="contain"><span>Fit</span></label>
+            </div>
+            <div class="seg" role="radiogroup" aria-label="Background behind the photo" id="bg-seg">
+              <label><input type="radio" name="bg" value="blur" checked><span>Blur</span></label>
+              <label><input type="radio" name="bg" value="#ffffff"><span>White</span></label>
+              <label><input type="radio" name="bg" value="#000000"><span>Black</span></label>
+            </div>
+            <label class="slider">Zoom <output for="zoom"></output>
+              <input type="range" id="zoom" min="1" max="3" step="0.05" value="1">
+            </label>
+            <button type="button" id="rotate" class="chip">↻ Rotate photo</button>
+            <p class="tip batch-only">Cropping is always set for each photo on its own.</p>
+          </div>
+
+          <div class="panel" data-panel="light" role="tabpanel" hidden>
+            <label class="slider">Brightness <output for="brightness"></output>
+              <input type="range" class="adj" id="brightness" min="0.7" max="1.4" step="0.01">
+            </label>
+            <label class="slider">Contrast <output for="contrast"></output>
+              <input type="range" class="adj" id="contrast" min="0.7" max="1.6" step="0.01">
+            </label>
+            <label class="slider">Shadows <output for="shadows"></output>
+              <input type="range" class="adj" id="shadows" min="-1" max="1" step="0.02">
+            </label>
+          </div>
+
+          <div class="panel" data-panel="color" role="tabpanel" hidden>
+            <label class="slider">Color boost <output for="saturation"></output>
+              <input type="range" class="adj" id="saturation" min="0" max="2" step="0.01">
+            </label>
+            <label class="slider">Warmth <output for="temperature"></output>
+              <input type="range" class="adj balance warm" id="temperature" min="-1" max="1" step="0.02">
+            </label>
+            <label class="slider">Tint <output for="tint"></output>
+              <input type="range" class="adj balance tint" id="tint" min="-1" max="1" step="0.02">
+            </label>
+          </div>
+
+          <div class="panel" data-panel="detail" role="tabpanel" hidden>
+            <label class="slider">Sharpen <output for="sharpen"></output>
+              <input type="range" class="adj" id="sharpen" min="0" max="2" step="0.05">
+            </label>
+            <label class="slider">Dithering style
+              <select id="dither" class="adj">
+                <optgroup label="Error diffusion (grainy, photographic)">
+                  <option value="floyd">Floyd–Steinberg: balanced (default)</option>
+                  <option value="atkinson">Atkinson: crisp, high contrast</option>
+                  <option value="jarvis">Jarvis–Judice–Ninke: smoothest gradients</option>
+                  <option value="stucki">Stucki: smooth, a bit sharper</option>
+                  <option value="burkes">Burkes: smooth, fast</option>
+                  <option value="sierra">Sierra: smooth, even grain</option>
+                  <option value="sierra-lite">Sierra Lite: fine grain, like Floyd–Steinberg</option>
+                </optgroup>
+                <optgroup label="Other">
+                  <option value="bayer">Bayer: regular crosshatch pattern</option>
+                  <option value="none">None: flat poster colors</option>
+                </optgroup>
+              </select>
+            </label>
+            <label class="slider">Dither strength <output for="strength"></output>
+              <input type="range" class="adj" id="strength" min="0.3" max="1" step="0.05">
+            </label>
+            <p class="tip">The frame has six inks, so dithering mixes dots of them to fake every other color. Which style looks best depends on the photo.</p>
+          </div>
+          <p class="tip">Double-click a slider to reset it.</p>
+          </div>
+
+          <div class="send-box">
+            <div id="save-to">
+              <label class="slider">Save to folder <select id="upload-album"></select></label>
+            </div>
+            <div id="from-section">
+              <label class="slider">Your name
+                <input type="text" id="from" maxlength="40" autocomplete="given-name" placeholder="Optional" class="text">
+              </label>
+              <label class="check"><input type="checkbox" id="show-name"> Sign the picture with my name</label>
+            </div>
+            <button id="send" class="primary">Send to frame</button>
+          </div>
+        </div>
       </div>
       <p id="msg" class="msg" role="status"></p>
     </section>
 
-    <p class="muted small foot">The frame checks for new pictures about once an hour. Press its button to update now.</p>
+    <section class="card" id="settings-card" hidden>
+      <details>
+        <summary><h2 class="section-title">Frame settings</h2><span class="meta">schedule, battery, quiet hours</span></summary>
+        <label class="slider">Change the picture
+          <select id="rotateHours">
+            <option value="0">Only when a new one arrives</option>
+            <option value="1">Every hour</option>
+            <option value="3">Every 3 hours</option>
+            <option value="6">Every 6 hours</option>
+            <option value="12">Every 12 hours</option>
+            <option value="24">Every day</option>
+            <option value="72">Every 3 days</option>
+            <option value="168">Every week</option>
+          </select>
+        </label>
+        <label class="slider">Check for new pictures
+          <select id="checkMinutes">
+            <option value="15">Every 15 minutes (shorter battery life)</option>
+            <option value="30">Every 30 minutes</option>
+            <option value="60">Every hour</option>
+            <option value="120">Every 2 hours</option>
+            <option value="240">Every 4 hours</option>
+            <option value="480">Every 8 hours (longest battery life)</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="quiet"> Sleep overnight (saves battery)</label>
+        <div class="row quiet-hours" id="quiet-hours">
+          <label class="slider">From <select id="quietStart"></select></label>
+          <label class="slider">Until <select id="quietEnd"></select></label>
+        </div>
+        <p class="muted small" id="tz-note"></p>
+        <button id="save-settings" class="primary">Save settings</button>
+        <p id="settings-msg" class="msg" role="status"></p>
+      </details>
+    </section>
+
+    <p class="muted small foot" id="foot">The frame checks for new pictures about once an hour. Press its button to update now.</p>
   </main>
   <script type="module" src="/upload.js"></script>
 </body>
