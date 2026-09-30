@@ -479,3 +479,17 @@ details > summary .meta { margin: 0; }
 @media (min-width: 1000px) {
   .hang { margin: 0 0 0 auto; align-self: center; }
 }
+
+/* In-page dialogs (browsers can block their own confirm/prompt) */
+dialog.ask {
+  width: min(440px, calc(100vw - 32px)); padding: 26px 24px 20px; border: 1px solid var(--line); border-radius: 4px;
+  background: var(--surface); color: var(--ink); box-shadow: var(--shadow);
+}
+dialog.ask::backdrop { background: rgba(20, 16, 12, .45); backdrop-filter: blur(2px); }
+.ask-title { font: italic 400 28px/1.1 var(--serif); margin: 0 0 10px; }
+.ask-message { color: var(--muted); font-size: 15px; margin: 0 0 16px; }
+.ask-input { margin: 0 0 16px; }
+.ask-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+.ask-buttons .ask-ok { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.ask-buttons .ask-ok.danger { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.ask-buttons .ask-ok:disabled { opacity: .35; cursor: not-allowed; }

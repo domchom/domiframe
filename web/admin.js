@@ -1,3 +1,4 @@
+import { ask, tell } from "./dialog.js";
 import { ago, until, batteryPct, LOW_BATTERY_PCT, rotateLabel } from "./format.js";
 
 const $ = (id) => document.getElementById(id);
@@ -127,10 +128,10 @@ async function newKey(f, which) {
   const warning = which === "upload"
     ? `Make a new upload link for "${f.name}"? The old link will stop working.`
     : `Make a new device key for "${f.name}"? The frame stops updating until you enter the new key in its setup portal (hold KEY3 and press reset).`;
-  if (!confirm(warning)) return;
+  if (!(await ask({ title: which === "upload" ? "New upload link?" : "New device key?", message: warning, ok: "Replace key", danger: true }))) return;
   const res = await api(`/${f.id}/keys`, { method: "POST", body: JSON.stringify({ key: which }) });
   const data = await res.json();
-  if (!res.ok) return alert(data.error || res.statusText);
+  if (!res.ok) return tell("That didn't work", data.error || res.statusText);
   showResult(f.id, data, which === "upload" ? "New upload link" : "New device key");
   load();
 }
@@ -142,14 +143,19 @@ async function turn(f, orientation) {
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ orientation }),
   });
-  if (!res.ok) return alert((await res.json().catch(() => ({}))).error || res.statusText);
+  if (!res.ok) return tell("That didn't work", (await res.json().catch(() => ({}))).error || res.statusText);
   load();
 }
 
 async function remove(f) {
-  if (prompt(`This deletes "${f.name}" and all its pictures. Type the frame ID (${f.id}) to confirm.`) !== f.id) return;
+  const typed = await ask({
+    title: `Delete “${f.name}”?`,
+    message: `This deletes the frame and all its pictures, and its links stop working. Type ${f.id} to confirm.`,
+    mustType: f.id, ok: "Delete frame", danger: true,
+  });
+  if (typed !== f.id) return;
   const res = await api(`/${f.id}`, { method: "DELETE" });
-  if (!res.ok) return alert((await res.json().catch(() => ({}))).error || res.statusText);
+  if (!res.ok) return tell("That didn't work", (await res.json().catch(() => ({}))).error || res.statusText);
   load();
 }
 

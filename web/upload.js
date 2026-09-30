@@ -1,4 +1,5 @@
 import { sizeFor, toPanelOrder, panelOf, DEFAULTS, ditherToPalette, pack, indicesToRGBA } from "./dither.js";
+import { ask, tell } from "./dialog.js";
 import { ago, until, batteryPct, LOW_BATTERY_PCT, rotateLabel, checkLabel, hourLabel } from "./format.js";
 
 const $ = (id) => document.getElementById(id);
@@ -255,7 +256,7 @@ function showBulkbar() {
 async function act(res, okMsg) {
   const r = await res;
   if (!r.ok) {
-    alert((await r.json().catch(() => ({}))).error || r.statusText);
+    await tell("That didn't work", (await r.json().catch(() => ({}))).error || r.statusText);
     return false;
   }
   if (okMsg) msg(okMsg, "ok");
@@ -264,11 +265,11 @@ async function act(res, okMsg) {
 }
 
 async function newFolder() {
-  const name = prompt("Name for the new folder:")?.trim();
+  const name = await ask({ title: "New folder", input: { placeholder: "e.g. Summer 2026" }, ok: "Create folder" });
   if (!name) return null;
   const r = await api("albums", jsonReq("POST", { name }));
   if (!r.ok) {
-    alert((await r.json().catch(() => ({}))).error || r.statusText);
+    await tell("Couldn't create the folder", (await r.json().catch(() => ({}))).error || r.statusText);
     return null;
   }
   const { album } = await r.json();
@@ -276,14 +277,19 @@ async function newFolder() {
   return album.id;
 }
 
-$("rename-folder").addEventListener("click", () => {
-  const name = prompt("Rename folder:", folderName(lib.view))?.trim();
+$("rename-folder").addEventListener("click", async () => {
+  const name = await ask({ title: "Rename folder", input: { value: folderName(lib.view) }, ok: "Rename" });
   if (name) act(api(`albums/${lib.view}`, jsonReq("PATCH", { name })));
 });
-$("delete-folder").addEventListener("click", () => {
+$("delete-folder").addEventListener("click", async () => {
   const n = frameInfo.pictures.filter(inView).length;
   const name = folderName(lib.view);
-  if (!confirm(`Delete the folder “${name}”?` + (n ? ` Its ${plural(n, "picture")} will be kept, just not in a folder. (To delete them too, use “Remove all in “${name}”” first.)` : ""))) return;
+  const ok = await ask({
+    title: `Delete the folder “${name}”?`,
+    message: n ? `Its ${plural(n, "picture")} will be kept, just not in a folder. To delete them too, use “Remove all in “${name}”” first.` : "",
+    ok: "Delete folder", danger: true,
+  });
+  if (!ok) return;
   const id = lib.view;
   lib.view = "all";
   act(api(`albums/${id}?pictures=keep`, { method: "DELETE" }));
@@ -304,17 +310,19 @@ $("sel-show").addEventListener("click", () => {
   lib.selected.clear();
   act(api(`pictures/${id}/show`, { method: "POST" }), "The frame will show it at its next check-in. Press its button to update now.");
 });
-$("sel-remove").addEventListener("click", () => {
+$("sel-remove").addEventListener("click", async () => {
   const ids = [...lib.selected];
-  if (!confirm(`Remove ${plural(ids.length, "picture")} from the frame? This can't be undone.`)) return;
+  const ok = await ask({ title: `Remove ${plural(ids.length, "picture")}?`, message: "They'll be deleted from the frame. This can't be undone.", ok: "Remove", danger: true });
+  if (!ok) return;
   lib.selected.clear();
   act(api("pictures", jsonReq("DELETE", { ids })));
 });
-$("remove-all").addEventListener("click", () => {
+$("remove-all").addEventListener("click", async () => {
   const n = frameInfo.pictures.filter(inView).length;
   const where = lib.view === "all" ? "" : lib.view === "unfiled" ? " that aren't in a folder" : ` in “${folderName(lib.view)}”`;
   const what = n === 1 ? `the picture${where}` : `all ${n} pictures${where}`;
-  if (!confirm(`Remove ${what} from the frame? This can't be undone.`)) return;
+  const ok = await ask({ title: `Remove ${what}?`, message: "They'll be deleted from the frame. This can't be undone.", ok: "Remove all", danger: true });
+  if (!ok) return;
   const body = lib.view === "all" ? { all: true } : { album: lib.view === "unfiled" ? null : lib.view };
   act(api("pictures", jsonReq("DELETE", body)));
 });
@@ -855,8 +863,9 @@ function clearEditor() {
   $("editor").hidden = true;
   $("file").value = $("folder").value = "";
 }
-$("clear-photos").addEventListener("click", () => {
-  if (photos.length > 1 && !editing && !confirm(`Clear all ${photos.length} photos from the editor? Nothing on the frame changes.`)) return;
+$("clear-photos").addEventListener("click", async () => {
+  if (photos.length > 1 && !editing &&
+    !(await ask({ title: `Clear all ${photos.length} photos?`, message: "This only empties the editor. Nothing on the frame changes.", ok: "Clear" }))) return;
   clearEditor();
 });
 
@@ -867,7 +876,7 @@ async function editUploaded(ids) {
   const editable = pics.filter((p) => p.hasOriginal);
   const old = pics.length - editable.length;
   if (!editable.length) {
-    alert(pics.length === 1
+    await tell("Can't edit", pics.length === 1
       ? "This picture was uploaded before editing was possible, so only the frame version was kept. Upload the photo again to change it."
       : "These pictures were uploaded before editing was possible. Upload the photos again to change them.");
     return;
