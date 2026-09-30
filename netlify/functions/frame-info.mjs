@@ -56,7 +56,7 @@ export default async (req, context) => {
     case "GET pictures :item original":
       return file(id, item, "jpg");
     case "PUT pictures :item":
-      return replace(req, id, item);
+      return replace(req, id, item, frame);
     case "POST pictures :item show":
       return change(id, (s) => (has(s, item) ? { ...s, showNext: item } : null));
     case "DELETE pictures :item":
@@ -143,18 +143,19 @@ async function putSettings(req, id, frame) {
   return json({ ok: true, settings });
 }
 
-async function replace(req, id, oldId) {
+async function replace(req, id, oldId, frame) {
   let form;
   try {
     form = await req.formData();
   } catch {
     return json({ error: "expected multipart form data" }, 400);
   }
-  const { parts, error } = await readPictureForm(form);
+  const panel = frame.settings?.panel || "7.3";
+  const { parts, error } = await readPictureForm(form, panel);
   if (error) return json({ error }, 400);
   if (!has(await loadState(id), oldId)) return json({ error: "not found" }, 404);
   // A new id, so cached previews of the old version don't linger
-  const pic = await storePicture(id, newPictureId(), parts);
+  const pic = await storePicture(id, newPictureId(), parts, panel);
   const next = replacePicture(await loadState(id), oldId, pic);
   if (!next) {
     await deletePictureFiles(id, [pic.id]); // deleted while we were saving

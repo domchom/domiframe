@@ -168,6 +168,14 @@ test("moving pictures and deleting folders", () => {
   assert.equal(r.state.albums.length, 1);
 });
 
+test("the rotation only includes pictures made for the frame's screen", () => {
+  const state = { ...emptyState(), pictures: [{ ...pic("a") }, { ...pic("b"), panel: "13.3" }, { ...pic("c"), panel: "7.3" }] };
+  const seen = { ...state, seen: ["a", "b", "c"], current: "a", since: new Date(T0).toISOString() };
+  assert.equal(choosePicture(state, { panel: "13.3" }, T0).state.current, "b");
+  assert.equal(choosePicture(seen, { panel: "7.3", rotateHours: 1 }, T0 + 2 * H).state.current, "c", "skips b");
+  assert.ok(mergeSettings({}, { panel: "10" }).error);
+});
+
 test("settings validate orientation", () => {
   assert.equal(mergeSettings({}, {}).settings.orientation, "landscape");
   assert.equal(mergeSettings({}, { orientation: "portrait" }).settings.orientation, "portrait");

@@ -1,10 +1,11 @@
 // /api/frames/:id/image
 //   GET  (the frame)   header X-Device-Key, optional If-None-Match, X-Battery-Mv, X-Fw,
-//                      X-Set-Orientation (landscape|portrait, when set on the frame)
+//                      X-Set-Orientation (landscape|portrait, when set on the frame),
+//                      X-Panel (7.3|13.3: the screen the firmware was built for)
 //        -> 200 packed image | 304 unchanged | 204 nothing uploaded yet
 //        Every reply carries X-Sleep-Minutes (when to check in next) and X-Orientation.
 //   POST (upload page) Authorization: Bearer <uploadKey or ADMIN_TOKEN>, multipart form:
-//        image   = 192000-byte packed 4bpp palette image (800x480)
+//        image   = packed 4bpp palette image for the frame's screen (7.3": 192,000 bytes, 13.3": 960,000)
 //        preview = PNG of what the frame will show (for the upload page)
 //        from    = optional sender name
 //        album   = optional folder id
@@ -16,7 +17,7 @@ import {
   frames, images, status, loadFrame, keyMatches, canManage, json,
   now, newPictureId, loadState, saveState, deletePictureFiles, readPictureForm, storePicture,
 } from "../lib/common.mjs";
-import { choosePicture, nextWakeMinutes, addPicture, mergeSettings } from "../lib/schedule.mjs";
+import { choosePicture, nextWakeMinutes, addPicture, mergeSettings, fitsPanel } from "../lib/schedule.mjs";
 
 export const config = { path: "/api/frames/:id/image" };
 
@@ -36,11 +37,14 @@ async function deviceFetch(req, id, frame) {
   }
   const t = now();
 
-  // Orientation chosen on the frame itself (setup portal, or the virtual frame's switch)
-  const setHang = req.headers.get("x-set-orientation");
-  if (setHang) {
-    const { settings, error } = mergeSettings(frame.settings, { orientation: setHang });
-    if (!error && settings.orientation !== frame.settings?.orientation) {
+  // Settings that come from the frame itself: its screen size (the hardware knows best) and the
+  // orientation chosen in its setup portal (or the virtual frame's switch)
+  const fromFrame = {};
+  if (req.headers.get("x-panel")) fromFrame.panel = req.headers.get("x-panel");
+  if (req.headers.get("x-set-orientation")) fromFrame.orientation = req.headers.get("x-set-orientation");
+  for (const [k, v] of Object.entries(fromFrame)) {
+    const { settings, error } = mergeSettings(frame.settings, { [k]: v });
+    if (!error && settings[k] !== (frame.settings || {})[k]) {
       frame = { ...frame, settings };
       await frames().setJSON(id, frame);
     }
@@ -63,7 +67,8 @@ async function deviceFetch(req, id, frame) {
   // How the frame hangs, for the virtual frame's display (the real one just draws the bytes)
   const sleep = { "x-sleep-minutes": String(sleepMinutes), "x-orientation": frame.settings?.orientation || "landscape" };
 
-  const pic = state.pictures.find((p) => p.id === state.current);
+  // Never send a picture made for another screen size: the frame would reject the byte count
+  const pic = state.pictures.find((p) => p.id === state.current && fitsPanel(p, frame.settings));
   if (!pic) return new Response(null, { status: 204, headers: sleep });
 
   const etag = `"${pic.etag}"`;
@@ -94,14 +99,15 @@ async function upload(req, id, frame) {
   } catch {
     return json({ error: "expected multipart form data" }, 400);
   }
-  const { parts, error } = await readPictureForm(form);
+  const panel = frame.settings?.panel || "7.3";
+  const { parts, error } = await readPictureForm(form, panel);
   if (error) return json({ error }, 400);
 
   let state = await loadState(id);
   const album = String(form.get("album") || "") || null;
   if (album && !state.albums.some((a) => a.id === album)) return json({ error: "no such folder" }, 400);
 
-  const pic = await storePicture(id, newPictureId(), parts);
+  const pic = await storePicture(id, newPictureId(), parts, panel);
   pic.album = album;
   pic.from = String(form.get("from") || "").trim().slice(0, 40) || null;
 

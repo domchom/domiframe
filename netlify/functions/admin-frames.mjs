@@ -1,6 +1,6 @@
 // Admin: create, list, delete frames and replace their keys.
 //   GET    /api/admin/frames                -> list frames with last check-in, battery, queue
-//   POST   /api/admin/frames {id, name}     -> create a frame, returns its keys ONCE
+//   POST   /api/admin/frames {id, name, panel?} -> create a frame ("7.3" or "13.3" screen), keys shown ONCE
 //   DELETE /api/admin/frames/:id            -> delete a frame and its pictures
 //   POST   /api/admin/frames/:id/keys {key: "upload"|"device"}
 //                                           -> new key (the old one stops working), returned ONCE
@@ -10,6 +10,7 @@ import {
   FRAME_ID_RE, frames, status, states, newKey, hashKey, isAdmin, json, loadFrame, loadState,
   deletePictureFiles, frameSummary,
 } from "../lib/common.mjs";
+import { mergeSettings } from "../lib/schedule.mjs";
 
 export const config = { path: ["/api/admin/frames", "/api/admin/frames/:id", "/api/admin/frames/:id/keys"] };
 
@@ -56,6 +57,8 @@ async function create(req) {
     return json({ error: "id must be 2-32 chars: lowercase letters, digits, dashes" }, 400);
   }
   if (await frames().get(id)) return json({ error: "frame already exists" }, 409);
+  const { settings, error } = mergeSettings({}, body.panel ? { panel: String(body.panel) } : {});
+  if (error) return json({ error }, 400);
 
   const uploadKey = newKey();
   const deviceKey = newKey();
@@ -64,6 +67,7 @@ async function create(req) {
     uploadKeyHash: hashKey(uploadKey),
     deviceKeyHash: hashKey(deviceKey),
     createdAt: new Date().toISOString(),
+    settings,
   });
 
   return json(

@@ -17,7 +17,10 @@ export const MAX_ALBUMS = 50;
 export const LOW_BATTERY_MV = 3450;
 export const ALBUM_ID_RE = /^[a-z0-9]{6,20}$/;
 
+export const PANEL_IDS = ["7.3", "13.3"]; // see PANELS in web/dither.js
+
 export const DEFAULT_SETTINGS = {
+  panel: "7.3",             // screen size; the frame reports it on every check-in
   orientation: "landscape", // how the frame hangs; pictures are made for it
   rotateHours: 24,
   checkMinutes: 60,
@@ -47,6 +50,10 @@ export function mergeSettings(current, update) {
   if ("checkMinutes" in u) {
     if (!CHECK_MINUTES.includes(Number(u.checkMinutes))) return { error: `checkMinutes must be one of ${CHECK_MINUTES}` };
     s.checkMinutes = Number(u.checkMinutes);
+  }
+  if ("panel" in u) {
+    if (!PANEL_IDS.includes(u.panel)) return { error: `panel must be one of ${PANEL_IDS.join(", ")}` };
+    s.panel = u.panel;
   }
   if ("orientation" in u) {
     if (!["landscape", "portrait"].includes(u.orientation)) return { error: 'orientation must be "landscape" or "portrait"' };
@@ -90,11 +97,15 @@ export function inQuietHours(ms, s) {
   return s.quietStart < s.quietEnd ? h >= s.quietStart && h < s.quietEnd : h >= s.quietStart || h < s.quietEnd;
 }
 
-/** The pictures the frame cycles through: the chosen folder, or everything. */
+/** A picture made for this frame's screen size (older pictures were all 7.3"). */
+export const fitsPanel = (pic, settings) => (pic.panel || "7.3") === (settings?.panel || DEFAULT_SETTINGS.panel);
+
+/** The pictures the frame cycles through: the chosen folder, or everything, for its screen size. */
 export function pool(state, settings) {
   const album = settings?.album;
-  if (!album || !state.albums.some((a) => a.id === album)) return state.pictures;
-  return state.pictures.filter((p) => p.album === album);
+  const sized = state.pictures.filter((p) => fitsPanel(p, settings));
+  if (!album || !state.albums.some((a) => a.id === album)) return sized;
+  return sized.filter((p) => p.album === album);
 }
 
 /**

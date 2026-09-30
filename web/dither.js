@@ -1,6 +1,25 @@
 // Image pipeline for a 7.3" E Ink Spectra 6 panel (800x480, 6 colors).
 // Pure functions, no DOM, so they can be tested in Node.
 
+// Supported screens. w×h is the picture when the frame hangs landscape; `native` is the way the
+// panel's own pixel rows run, which is the order the frame receives them in.
+export const PANELS = {
+  "7.3": { name: '7.3"', w: 800, h: 480, native: "landscape" },  // Seeed 7.3" Spectra 6, EE04 board
+  "13.3": { name: '13.3"', w: 1600, h: 1200, native: "portrait" }, // Seeed 13.3" Spectra 6, EE02 board (1200×1600 native)
+};
+export const DEFAULT_PANEL = "7.3";
+export const panelOf = (id) => PANELS[id] || PANELS[DEFAULT_PANEL];
+
+/** Picture size for a screen and orientation. */
+export function sizeFor(panelId, portrait) {
+  const p = panelOf(panelId);
+  return portrait ? { w: p.h, h: p.w } : { w: p.w, h: p.h };
+}
+
+/** Bytes the frame receives: 4 bits per pixel. */
+export const imageBytes = (panelId) => (panelOf(panelId).w * panelOf(panelId).h) / 2;
+
+// The 7.3" panel, kept for older callers
 export const PANEL_W = 800;
 export const PANEL_H = 480;
 
@@ -213,19 +232,30 @@ export function floatToRGBA(buf) {
   return out;
 }
 
-/** Portrait (480x800) indices -> panel (800x480), rotated 90° clockwise. */
-export function rotatePortraitToPanel(idx) {
-  const out = new Uint8Array(PANEL_W * PANEL_H);
-  const pw = PANEL_H, ph = PANEL_W; // portrait dims
-  for (let y = 0; y < ph; y++) {
-    for (let x = 0; x < pw; x++) {
-      out[x * PANEL_W + (ph - 1 - y)] = idx[y * pw + x];
+/** w×h indices turned 90° clockwise -> h×w. */
+export function rotateCW(idx, w, h) {
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      out[x * h + (h - 1 - y)] = idx[y * w + x];
     }
   }
   return out;
 }
 
-/** 800x480 indices -> 192000 bytes, two pixels per byte, high nibble = left pixel. */
+/** Portrait (480x800) indices -> 7.3" panel (800x480), rotated 90° clockwise. */
+export const rotatePortraitToPanel = (idx) => rotateCW(idx, PANEL_H, PANEL_W);
+
+/**
+ * A w×h picture in the panel's own row order: turned 90° clockwise when the frame hangs the
+ * other way from how the panel's rows run (e.g. a portrait-hung 7.3", a landscape-hung 13.3").
+ */
+export function toPanelOrder(idx, w, h, panelId) {
+  const nativeLandscape = panelOf(panelId).native === "landscape";
+  return (w >= h) === nativeLandscape ? idx : rotateCW(idx, w, h);
+}
+
+/** Indices -> bytes, two pixels per byte, high nibble = left pixel (800x480 -> 192000 bytes). */
 export function pack(idx) {
   const out = new Uint8Array(idx.length / 2);
   for (let i = 0; i < out.length; i++) out[i] = (idx[2 * i] << 4) | idx[2 * i + 1];

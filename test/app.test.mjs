@@ -314,3 +314,42 @@ test("folders, show next, replace, bulk move and delete", async () => {
   assert.equal((await info()).pictures.length, 0);
   assert.equal((await dev()).status, 204);
 });
+
+test("13.3-inch frames: bigger pictures, and never a picture made for the other screen", async () => {
+  let res = await admin(new Request(url("/api/admin/frames"), {
+    method: "POST",
+    headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
+    body: JSON.stringify({ id: "big", name: "Big", panel: "13.3" }),
+  }), { params: {} });
+  assert.equal(res.status, 201);
+  const { uploadKey, deviceKey } = await res.json();
+  const bad = await admin(new Request(url("/api/admin/frames"), {
+    method: "POST",
+    headers: { authorization: `Bearer ${ADMIN}`, "content-type": "application/json" },
+    body: JSON.stringify({ id: "bad", panel: "42" }),
+  }), { params: {} });
+  assert.equal(bad.status, 400);
+
+  const ctx = { params: { id: "big" } };
+  const post = (bytes) => {
+    const f = new FormData();
+    f.append("image", new Blob([new Uint8Array(bytes).fill(0x23)]));
+    return frameImage(new Request(url("/api/frames/big/image"), { method: "POST", headers: { authorization: `Bearer ${uploadKey}` }, body: f }), ctx);
+  };
+  const dev = (extra = {}) =>
+    frameImage(new Request(url("/api/frames/big/image"), { headers: { "x-device-key": deviceKey, ...extra } }), ctx);
+
+  assert.equal((await post(192000)).status, 400, "a 7.3-inch picture doesn't fit");
+  assert.equal((await post(960000)).status, 200);
+
+  res = await dev({ "x-panel": "13.3" });
+  assert.equal(res.status, 200);
+  assert.equal((await res.arrayBuffer()).byteLength, 960000);
+
+  // The frame says it's a 7.3" after all: the 13.3" picture is not sent
+  res = await dev({ "x-panel": "7.3" });
+  assert.equal(res.status, 204);
+  const info = await (await frameInfo(new Request(url("/api/frames/big/info"), { headers: { authorization: `Bearer ${uploadKey}` } }), ctx)).json();
+  assert.equal(info.settings.panel, "7.3");
+  assert.equal(info.pictures[0].panel, "13.3");
+});

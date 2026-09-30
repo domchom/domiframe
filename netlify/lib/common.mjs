@@ -1,13 +1,12 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { getStore } from "@netlify/blobs";
 import { emptyState, normalizeState, DEFAULT_SETTINGS } from "./schedule.mjs";
+import { imageBytes } from "../../web/dither.js";
 
-// 7.3" E Ink Spectra 6 panel
-export const WIDTH = 800;
-export const HEIGHT = 480;
-// 4 bits per pixel, two pixels per byte, high nibble first
-export const IMAGE_BYTES = (WIDTH * HEIGHT) / 2;
-export const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
+// Picture size depends on the frame's screen (web/dither.js PANELS): 4 bits per pixel,
+// two pixels per byte, high nibble first. 7.3" = 192,000 bytes, 13.3" = 960,000 bytes.
+export { imageBytes };
+export const MAX_PREVIEW_BYTES = 3 * 1024 * 1024;
 export const MAX_ORIGINAL_BYTES = 4 * 1024 * 1024; // the photo as uploaded (JPEG, ~2000 px), for editing later
 export const MAX_EDITS_BYTES = 4096;
 
@@ -120,15 +119,18 @@ export async function frameSummary(id, frame) {
 
 /**
  * Parse an uploaded picture (multipart form):
- *   image     192000-byte packed 4bpp palette image (required)
+ *   image     packed 4bpp palette image, imageBytes(panel) long (required)
  *   preview   PNG of what the frame shows
  *   original  JPEG of the photo, so it can be edited again later
  *   edits     JSON of the editor settings used
  * Returns { parts } or { error }.
  */
-export async function readPictureForm(form) {
+export async function readPictureForm(form, panel) {
+  const bytes = imageBytes(panel);
   const image = form.get("image");
-  if (!(image instanceof Blob) || image.size !== IMAGE_BYTES) return { error: `image must be exactly ${IMAGE_BYTES} bytes` };
+  if (!(image instanceof Blob) || image.size !== bytes) {
+    return { error: `image must be exactly ${bytes} bytes for a ${panel || "7.3"}" screen` };
+  }
   const bin = new Uint8Array(await image.arrayBuffer());
   for (const b of bin) {
     if ((b >> 4) > 5 || (b & 0x0f) > 5) return { error: "invalid palette index" };
@@ -158,10 +160,10 @@ export async function readPictureForm(form) {
 }
 
 /** Save a parsed picture's files; returns the picture record (without album/from). */
-export async function storePicture(id, picId, parts) {
+export async function storePicture(id, picId, parts, panel) {
   const { bin, etag, preview, original, edits } = parts;
   await images().set(`${id}/${picId}.bin`, bin.buffer, { metadata: { etag } });
   if (preview) await images().set(`${id}/${picId}.png`, await preview.arrayBuffer());
   if (original) await images().set(`${id}/${picId}.jpg`, await original.arrayBuffer());
-  return { id: picId, uploadedAt: new Date(now()).toISOString(), etag, hasOriginal: !!original, edits };
+  return { id: picId, uploadedAt: new Date(now()).toISOString(), etag, hasOriginal: !!original, edits, panel: panel || "7.3" };
 }
