@@ -673,11 +673,11 @@ details > summary .meta { margin: 0; }
 .prose h3 { margin: 28px 0 8px; }
 .prose p, .prose li { font-size: 15px; line-height: 1.65; max-width: 68ch; }
 .prose p { margin: 0 0 12px; }
-.prose ul { margin: 0 0 12px; padding-left: 20px; }
+.prose ul, .prose ol { margin: 0 0 12px; padding-left: 20px; }
 .prose li { margin: 0 0 8px; }
 .prose .lede { margin-bottom: 10px; }
-.prose a, .foot a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
-.prose a:hover, .foot a:hover { color: var(--accent); }
+.prose a, .foot a, .tip a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.prose a:hover, .foot a:hover, .tip a:hover { color: var(--accent); }
 .legal-links { margin-top: 4px; }
 
 
