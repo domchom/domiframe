@@ -339,6 +339,7 @@ input[type=range]:active::-moz-range-thumb { background: var(--accent); border-c
 .preview.draggable:active { cursor: grabbing; }
 .hint { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
 .hint .link { font: 12px var(--mono); margin-left: auto; }
+.preview-note { margin-top: 8px; font-size: 12px; }
 
 /* Filmstrip: uniform frames, like a contact strip */
 .filmstrip { display: flex; align-items: center; gap: 6px; margin: 14px 0 0; }
