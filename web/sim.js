@@ -95,12 +95,40 @@ function showUploadLink(id) {
   if (!a.hidden) a.href = `/f/${id}#k=${frameCode(id)}`;
 }
 
-// The same words as the firmware's code screen
-// with a QR code that opens the frame's page with the code filled in (after the #, so it's
-// never sent to the server)
-const showCode = (id) =>
-  message(frameCode(id), `Frame ID: ${id}`, `Scan, or use both at ${location.host}`,
-    `${location.origin}/f/${id}#k=${frameCode(id)}`);
+// The firmware's showCodeScreen(): the code in two big lines, the frame ID under it, and a QR
+// code that opens the frame's page with the code filled in (after the #, so it's never sent to
+// the server): beside them on a wide screen, under them on a tall one
+const showCode = (id) => screen(({ w, h, rect, text, width, header, footer }) => {
+  const code = frameCode(id), qrText = `${location.origin}/f/${id}#k=${code}`;
+  const split = code.length === 19;
+  header();
+  let qr = null;
+  if (window.qrcode) {
+    qr = window.qrcode(0, "M");
+    qr.addData(qrText);
+    qr.make();
+  }
+  const foot = footer(qr ? "Scan with a phone camera, or" : `Enter both at ${location.host},`,
+    qr ? `enter both at ${location.host}.` : "under My frame.");
+  text("FRAME CODE", MARGIN, HEAD + 44, MONO_9, 3);
+  let y = HEAD + 94;
+  text(split ? code.slice(0, 9) : code, MARGIN, y, MONO_24, 0);
+  if (split) text(code.slice(10), MARGIN, (y += 48), MONO_24, 0);
+  const wide = w > h, n = qr ? qr.getModuleCount() : 0, side = qr ? (n + 8) * QR_MODULE + 6 : 0;
+  const room = (qr && wide ? w - MARGIN - side - 24 : w - MARGIN) - MARGIN;
+  text("FRAME ID", MARGIN, (y += 48), MONO_9, 3);
+  const idFont = [MONO_18, MONO_12, MONO_9].find((f) => width(id, f) <= room) || MONO_9;
+  text(id, MARGIN, (y += 34), idFont, 0);
+  if (qr) {
+    const top = wide ? HEAD : y + 20;
+    const x0 = wide ? w - MARGIN - side : Math.floor((w - side) / 2), y0 = top + Math.floor((foot - top - side) / 2);
+    rect(x0, y0, side, side, 0);
+    rect(x0 + 3, y0 + 3, side - 6, side - 6, 1);
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      if (qr.isDark(r, c)) rect(x0 + 3 + (c + 4) * QR_MODULE, y0 + 3 + (r + 4) * QR_MODULE, QR_MODULE, QR_MODULE, 0);
+    }
+  }
+});
 
 const showMv = () => ($("mvText").textContent = `${$("mv").value} mV`);
 $("mv").addEventListener("input", showMv); showMv();
@@ -128,36 +156,55 @@ async function refresh(paint) {
   show();
 }
 
-// Same layout as showMessage() in firmware/src/main.cpp (doubled on the 13.3"), drawn upright
-// however the frame hangs (rotation 1 when turned: the text's top is the panel's right edge)
-// qrText: also draw it as a QR code, placed as qrPlace() in the firmware does
-const message = (title, line1, line2, qrText) => refresh(() => {
+// Same layout as the messages in firmware/src/main.cpp (twice the size on the 13.3"), drawn
+// upright however the frame hangs (rotation 1 when turned: the text's top is the panel's right
+// edge). Fonts stand in for the firmware's Adafruit GFX ones at about the same size.
+const MARGIN = 40, HEAD = 88, QR_MODULE = 5;
+const SANS_18 = "bold 34px Helvetica, Arial, sans-serif", SANS_12 = "24px Helvetica, Arial, sans-serif";
+const MONO_9 = "bold 18px 'Courier New', monospace", MONO_12 = "bold 23px 'Courier New', monospace";
+const MONO_18 = "bold 35px 'Courier New', monospace", MONO_24 = "bold 47px 'Courier New', monospace";
+
+const screen = (paint) => refresh(() => {
   const m = document.createElement("canvas");
   m.width = turned() ? H : W;
   m.height = turned() ? W : H;
   const k = screenSize === "13.3" ? 2 : 1;
   const c = m.getContext("2d");
-  c.fillStyle = rgb(1); c.fillRect(0, 0, m.width, m.height);
-  c.fillStyle = rgb(0);
-  c.font = `bold ${34 * k}px Helvetica, Arial, sans-serif`; c.fillText(title, 40 * k, 120 * k);
-  c.font = `${24 * k}px Helvetica, Arial, sans-serif`; c.fillText(line1, 40 * k, 190 * k);
-  if (line2) c.fillText(line2, 40 * k, 230 * k);
-  [3, 2, 5, 4].forEach((b, i) => { c.fillStyle = rgb(b); c.fillRect((40 + i * 60) * k, 400 * k, 60 * k, 12 * k); });
-  if (qrText && window.qrcode) {
-    const qr = window.qrcode(0, "M");
-    qr.addData(qrText);
-    qr.make();
-    const n = qr.getModuleCount(), mod = 5 * k, margin = 40 * k, side = (n + 8) * mod;
-    const wide = m.width > m.height;
-    const x0 = (wide ? m.width - margin - side : (m.width - side) / 2) + 4 * mod;
-    const y0 = (wide ? (m.height - side) / 2 : m.height - margin - side) + 4 * mod;
-    c.fillStyle = rgb(0);
-    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.isDark(y, x)) c.fillRect(x0 + x * mod, y0 + y * mod, mod, mod);
-  }
+  const w = m.width / k, h = m.height / k;
+  const font = (f) => f.replace(/(\d+)px/, (_, px) => `${px * k}px`);
+  const rect = (x, y, rw, rh, ink) => { c.fillStyle = rgb(ink); c.fillRect(x * k, y * k, rw * k, rh * k); };
+  const text = (t, x, y, f, ink) => { c.font = font(f); c.fillStyle = rgb(ink); c.fillText(t, x * k, y * k); };
+  const width = (t, f) => { c.font = f; return c.measureText(t).width; };
+  // The wordmark with a red offset shadow and the six inks beside it, over a rule
+  const header = () => {
+    text("DomiFrame", MARGIN + 2, 68, SANS_18, 3);
+    text("DomiFrame", MARGIN, 66, SANS_18, 0);
+    const x = MARGIN + Math.ceil(width("DomiFrame", SANS_18)) + 20;
+    rect(x - 2, 44, 6 * 16 + 4, 16, 0);
+    [0, 4, 5, 2, 3, 1].forEach((ink, i) => rect(x + i * 16, 46, 16, 12, ink));
+    rect(MARGIN, HEAD - 3, w - 2 * MARGIN, 3, 0);
+  };
+  // Two lines at the bottom under a thin rule; returns where the rule is
+  const footer = (line1, line2) => {
+    const y = h - MARGIN - 62;
+    rect(MARGIN, y, w - 2 * MARGIN, 1, 0);
+    text(line1, MARGIN, y + 32, SANS_12, 0);
+    if (line2) text(line2, MARGIN, y + 62, SANS_12, 0);
+    return y;
+  };
+  rect(0, 0, w, h, 1);
+  paint({ w, h, rect, text, width, header, footer });
   ctx.save();
   if (turned()) ctx.setTransform(0, 1, -1, 0, W, 0);
   ctx.drawImage(m, 0, 0);
   ctx.restore();
+});
+
+const message = (title, line1, line2) => screen(({ text, header }) => {
+  header();
+  text(title, MARGIN, HEAD + 70, SANS_18, 0);
+  text(line1, MARGIN, HEAD + 130, SANS_12, 0);
+  if (line2) text(line2, MARGIN, HEAD + 166, SANS_12, 0);
 });
 
 // Same decoding as drawPacked(): 4 bpp, high nibble = left pixel
