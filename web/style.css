@@ -23,6 +23,7 @@
   --mat: #fbfbf8;
   --frame: var(--ink-black);
   --grid: rgba(25, 30, 33, .07);
+  --field: var(--mat); /* inputs and list rows inside cards */
   --card: var(--surface); /* virtual frame page */
 
   --sans: "IBM Plex Sans", ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -31,9 +32,10 @@
   --serif: var(--display); /* older names in the pages */
   color-scheme: light;
 }
+/* The panel inverted: white ink on black. Follows the system setting unless the theme
+   button (theme.js) picked one; the two blocks must match. */
 @media (prefers-color-scheme: dark) {
-  /* The panel inverted: white ink on black */
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #111416;
     --surface: #191e21;
     --ink: var(--ink-white);
@@ -46,8 +48,25 @@
     --mat: #e8e8e8;
     --frame: #000;
     --grid: rgba(232, 232, 232, .05);
+    --field: var(--bg);
     color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --bg: #111416;
+  --surface: #191e21;
+  --ink: var(--ink-white);
+  --muted: #9ba1a6;
+  --line: var(--ink-white);
+  --soft-line: #3b4247;
+  --accent: #e0454a;
+  --accent-ink: #fff;
+  --ok: #6fbf7e;
+  --mat: #e8e8e8;
+  --frame: #000;
+  --grid: rgba(232, 232, 232, .05);
+  --field: var(--bg);
+  color-scheme: dark;
 }
 
 /* ---- Dithered shadows -------------------------------------------------------- */
@@ -199,7 +218,17 @@ button.primary:disabled { opacity: .5; cursor: wait; }
 .chip.danger { color: var(--accent); border-color: var(--accent); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 a.chip { text-decoration: none; display: inline-block; }
-.frame-switch { margin-left: auto; max-width: 100%; }
+.frame-switch { max-width: 100%; }
+
+/* Theme button: a square half ink, half paper, like the panel inverted */
+.theme-toggle {
+  margin-left: auto; flex: none; width: 36px; height: 36px; padding: 0; display: grid; place-items: center;
+  border: 1.5px solid var(--ink); border-radius: 0; background: var(--surface); cursor: pointer;
+}
+.theme-toggle:hover { background: var(--surface) radial-gradient(var(--soft-line) .8px, transparent 1px) 0 0 / 3px 3px; }
+.theme-toggle i { width: 14px; height: 14px; border: 1.5px solid var(--ink); background: linear-gradient(90deg, var(--ink) 50%, var(--bg) 0); }
+.site-head .site-tabs { margin-left: auto; }
+.site-head .theme-toggle { margin-left: 0; }
 .frame-switch select { max-width: 100%; }
 select.chip { width: auto; display: inline-block; margin: 0; padding: 8px 10px; text-transform: none; letter-spacing: 0; font-family: var(--sans); font-size: 13px; }
 
@@ -223,10 +252,7 @@ button.link:hover { text-decoration-thickness: 2px; }
 .slider output { float: right; color: var(--ink); font: 12px/1.8 var(--mono); }
 input.text, .slider select, .card select:not(.chip) {
   display: block; width: 100%; margin-top: 6px; font: inherit; font-size: 15px; padding: 10px 12px;
-  border-radius: 0; border: 1.5px solid var(--ink); background: var(--mat); color: var(--ink);
-}
-@media (prefers-color-scheme: dark) {
-  input.text, .slider select, .card select:not(.chip) { background: var(--bg); }
+  border-radius: 0; border: 1.5px solid var(--ink); background: var(--field); color: var(--ink);
 }
 input.text:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .check { display: flex; align-items: center; gap: 10px; font-size: 15px; margin: 12px 0; cursor: pointer; }
@@ -529,9 +555,8 @@ details > summary .meta { margin: 0; }
 .saved-frames li { display: flex; align-items: center; gap: 14px; }
 .saved-open {
   flex: 1; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 14px 16px;
-  border: 2px solid var(--ink); color: var(--ink); text-decoration: none; background: var(--mat);
+  border: 2px solid var(--ink); color: var(--ink); text-decoration: none; background: var(--field);
 }
-@media (prefers-color-scheme: dark) { .saved-open { background: var(--bg); } }
 .saved-open b { font: 700 18px/1.2 var(--display); }
 .saved-open span { font: 12px var(--mono); color: var(--muted); }
 .saved-open span::after { content: "  ▸"; color: var(--ink); }
@@ -556,10 +581,9 @@ details > summary .meta { margin: 0; }
 
 /* ---- Admin --------------------------------------------------------------------- */
 
-.brand #signout { margin-left: auto; font-size: 14px; }
+.brand #signout { font-size: 14px; }
 .frames { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
-.frames li { border: 1.5px solid var(--ink); padding: 16px; display: grid; gap: 6px; background: var(--mat); }
-@media (prefers-color-scheme: dark) { .frames li { background: var(--bg); } }
+.frames li { border: 1.5px solid var(--ink); padding: 16px; display: grid; gap: 6px; background: var(--field); }
 .frame-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .frame-head strong { font: 700 22px/1.1 var(--display); }
 .frame-head .muted { font: 12px var(--mono); }
@@ -631,9 +655,8 @@ details > summary .meta { margin: 0; }
 }
 .hang-mismatch {
   display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: 14px; margin: 0 0 16px;
-  padding: 8px 12px; border: 1.5px solid var(--accent); border-left-width: 6px; background: var(--mat);
+  padding: 8px 12px; border: 1.5px solid var(--accent); border-left-width: 6px; background: var(--field);
 }
-@media (prefers-color-scheme: dark) { .hang-mismatch { background: var(--bg); } }
 
 /* In-page dialogs (browsers can block their own confirm/prompt) */
 dialog.ask {

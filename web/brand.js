@@ -4,7 +4,8 @@ import { PALETTE } from "./dither.js";
 
 const DOT = 2; // CSS px per ink dot
 const INK = Object.fromEntries(PALETTE.map((p) => [p.name, p.rgb]));
-const dark = () => matchMedia("(prefers-color-scheme: dark)").matches;
+const dark = () => (document.documentElement.dataset.theme ||
+  (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
 
 // 4×4 Bayer thresholds (0..1): the regular crosshatch ordered dithering makes
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
@@ -90,4 +91,5 @@ const draw = () => {
 };
 draw();
 // Letters are black ink on light pages and white on dark: redraw if the theme changes
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+// (theme.js fires this for the button and for system changes)
+document.addEventListener("themechange", draw);
