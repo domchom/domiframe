@@ -289,9 +289,9 @@ test("full flow: create frame, frame makes its code, queue pictures, rotate, set
   assert.equal((await f.dev({}, newDeviceKey)).status, 404);
 });
 
-test("a new frame code: only the device key can set it, the old code stops working, sealed pictures go", async () => {
+test("a new frame code: only the device key can set it, the old code stops working, its pictures are put aside", async () => {
   const f = await newFrame("recode");
-  await f.upload(0x11, { from: "Mom" });
+  const pic = await f.upload(0x11, { from: "Mom" });
   const { album } = await (await f.call("albums", jsonBody("POST", { name: await f.sealName("Beach") }))).json();
   assert.ok(album.id);
 
@@ -304,9 +304,9 @@ test("a new frame code: only the device key can set it, the old code stops worki
   }), f.ctx);
   assert.equal(bad.status, 400);
 
-  // the frame makes a new code
+  // the frame makes a new code: the old one stops working, its pictures are put aside
   const { res: ok, code } = await claim("recode", f.deviceKey);
-  assert.deepEqual(await ok.json(), { ok: true, cleared: 1 });
+  assert.deepEqual(await ok.json(), { ok: true, putAway: 1, restored: 0 });
   assert.equal((await f.call("info")).status, 404, "the old code stops working");
   const { auth } = await frameKeys("recode", code);
   const info = await (await f.call("info", {}, auth)).json();
@@ -318,9 +318,69 @@ test("a new frame code: only the device key can set it, the old code stops worki
     method: "POST", headers: { "x-device-key": f.deviceKey, "content-type": "application/json" },
     body: JSON.stringify({ hash: sha256(auth) }),
   }), f.ctx);
-  assert.deepEqual(await again.json(), { ok: true, cleared: 0 });
+  assert.deepEqual(await again.json(), { ok: true, putAway: 0, restored: 0 });
 
-  // a frame the admin just made has no code yet: nothing opens it
+  // a third code before anything was sent under the second: the first code's pictures stay aside
+  const { res: third } = await claim("recode", f.deviceKey);
+  assert.deepEqual(await third.json(), { ok: true, putAway: 0, restored: 0 });
+
+  // the old code typed back into the frame: its pictures and folder come back, and open again
+  const back = await claim("recode", f.deviceKey, f.code);
+  assert.deepEqual(await back.res.json(), { ok: true, putAway: 0, restored: 1 });
+  const restored = await f.info();
+  assert.deepEqual(restored.pictures.map((p) => p.id), [pic.id]);
+  assert.equal(restored.albums.length, 1);
+  assert.equal((await f.opened(await f.call(`pictures/${pic.id}`))).length, 5);
+});
+
+test("pictures put aside with an old code are deleted once its time is up", async () => {
+  const f = await newFrame("expire");
+  const pic = await f.upload(0x11);
+  const { code } = await claim("expire", f.deviceKey);
+  const { auth } = await frameKeys("expire", code);
+  globalThis.__domiframeClockOffset = 31 * 864e5;
+  try {
+    assert.equal((await f.dev()).status, 204); // a check-in tidies up
+    // too late to go back: the old code works again, but its pictures are gone
+    const back = await claim("expire", f.deviceKey, f.code);
+    assert.deepEqual(await back.res.json(), { ok: true, putAway: 0, restored: 0 });
+    assert.equal((await f.info()).pictures.length, 0);
+    assert.equal((await f.call(`pictures/${pic.id}`)).status, 404);
+    assert.equal((await f.call("info", {}, auth)).status, 404);
+  } finally {
+    globalThis.__domiframeClockOffset = 0;
+  }
+});
+
+test("firmware updates: offered to frames on an older version of the same build", async () => {
+  const f = await newFrame("ota");
+  globalThis.__domiframeFirmware = {
+    ee04: { version: "0.7.0", file: "ee04-0.7.0.bin", size: 1234567, sig: "MEUCIQ" },
+  };
+  try {
+    const offer = (await f.dev({ "x-fw": "0.6.0", "x-fw-env": "ee04" })).headers;
+    assert.equal(offer.get("x-fw-update"), "0.7.0");
+    assert.equal(offer.get("x-fw-url"), "/firmware/ee04-0.7.0.bin");
+    assert.equal(offer.get("x-fw-size"), "1234567");
+    assert.equal(offer.get("x-fw-sig"), "MEUCIQ");
+    for (const extra of [
+      { "x-fw": "0.7.0", "x-fw-env": "ee04" },         // up to date
+      { "x-fw": "0.10.0", "x-fw-env": "ee04" },        // newer (compared as numbers, not text)
+      { "x-fw": "0.6.0", "x-fw-env": "ee02-13in3" },   // another build: nothing released
+      { "x-fw": "0.6.0" },                             // older firmware that can't update itself
+    ]) {
+      assert.equal((await f.dev(extra)).headers.get("x-fw-update"), null, JSON.stringify(extra));
+    }
+  } finally {
+    delete globalThis.__domiframeFirmware;
+  }
+  const { newerVersion } = await import("../netlify/lib/firmware.mjs");
+  assert.ok(newerVersion("0.10.0", "0.9.9"));
+  assert.ok(!newerVersion("0.6.0", "0.6.0"));
+  assert.ok(!newerVersion("1.0", "0.6.0"));
+});
+
+test("a frame the admin just made has no code yet: nothing opens it", async () => {
   const created = await adminReq("/api/admin/frames", { method: "POST", body: JSON.stringify({ id: "fresh" }) });
   assert.equal(created.status, 201);
   const guess = await frameKeys("fresh", makeCode());

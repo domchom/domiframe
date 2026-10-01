@@ -83,8 +83,9 @@ async function registerCode(id, key) {
   log(`POST /api/frames/${id}/code -> ${res.status}`);
   if (res.ok) {
     store.set(`pending:${id}`, "");
-    const { cleared } = await res.json();
-    if (cleared) log(`server removed ${cleared} picture(s) sealed with the old code`);
+    const { putAway, restored } = await res.json();
+    if (putAway) log(`server put aside ${putAway} picture(s) sealed with the old code`);
+    if (restored) log(`server brought back ${restored} picture(s) sealed with this code`);
   }
   return res.status;
 }
@@ -347,7 +348,7 @@ $("new-code").addEventListener("click", async () => {
   if (!id) return;
   if (frameCode(id) && !(await ask({
     title: "Make a new frame code?",
-    message: "The old code stops working, and all of this frame's pictures and folders are removed from the server (they were locked with the old code).",
+    message: "The old code stops working, and this frame's pictures and folders are put away on the server for 30 days (they were locked with the old code).",
     ok: "New code", danger: true,
   }))) return;
   newFrameCode(id);

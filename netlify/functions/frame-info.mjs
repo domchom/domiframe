@@ -27,6 +27,7 @@
 import {
   frames, images, loadFrame, canManage, json, loadState, updateState, deletePictureFiles, frameSummary,
   readPictureForm, storePicture, newPictureId, newAlbumId, PIC_ID_RE, now, sealedText, MAX_NAME_CHARS,
+  purgeOldCode,
 } from "../lib/common.mjs";
 import {
   mergeSettings, removePictures, replacePicture, movePictures, addAlbum, renameAlbum, deleteAlbum,
@@ -54,7 +55,7 @@ export default async (req, context) => {
 
   switch (route) {
     case "GET info":
-      await purgeTrash(id);
+      await Promise.all([purgeTrash(id), purgeOldCode(id, frame)]);
       return json(await frameSummary(id, frame));
     case "GET preview":
       return file(id, (await loadState(id)).current, "png", "private, no-cache");

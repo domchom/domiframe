@@ -12,7 +12,7 @@
 
 import {
   FRAME_ID_RE, frames, status, states, newKey, hashKey, isAdmin, json, loadFrame, loadState,
-  deletePictureFiles, adminSummary,
+  deletePictureFiles, adminSummary, deleteAside,
 } from "../lib/common.mjs";
 import { mergeSettings } from "../lib/schedule.mjs";
 
@@ -109,6 +109,7 @@ async function putSettings(req, id, frame) {
 async function remove(id) {
   const state = await loadState(id);
   await deletePictureFiles(id, [...state.pictures, ...state.trash].map((p) => p.id));
+  await deleteAside(id);
   await Promise.all([frames().delete(id), status().delete(id), states().delete(id)]);
   return json({ ok: true });
 }

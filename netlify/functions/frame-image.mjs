@@ -1,9 +1,12 @@
 // /api/frames/:id/image
 //   GET  (the frame)   header X-Device-Key, optional If-None-Match, X-Battery-Mv, X-Fw,
 //                      X-Set-Orientation (landscape|portrait, when set on the frame),
-//                      X-Panel (7.3|13.3: the screen the firmware was built for)
+//                      X-Panel (7.3|13.3: the screen the firmware was built for),
+//                      X-Fw-Env (ee04|ee02-13in3: which firmware build it runs)
 //        -> 200 sealed packed image | 304 unchanged | 204 nothing uploaded yet
-//        Every reply carries X-Sleep-Minutes (when to check in next) and X-Orientation.
+//        Every reply carries X-Sleep-Minutes (when to check in next) and X-Orientation, and
+//        when newer firmware is out: X-Fw-Update (version), X-Fw-Url, X-Fw-Size and X-Fw-Sig
+//        (see lib/firmware.mjs).
 //   POST (upload page) Authorization: Bearer <token derived from the frame code>, multipart form,
 //        everything sealed in the browser (web/seal.js), so the server can't see any of it:
 //        image   = packed 4bpp palette image for the frame's screen (7.3": 192,000 bytes, 13.3": 960,000) + 28
@@ -17,7 +20,9 @@
 import {
   frames, images, status, loadFrame, keyMatches, canManage, json, sealedText, MAX_NAME_CHARS,
   now, newPictureId, updateState, loadState, deletePictureFiles, readPictureForm, storePicture,
+  purgeOldCode,
 } from "../lib/common.mjs";
+import { firmwareHeaders } from "../lib/firmware.mjs";
 import { choosePicture, nextWakeMinutes, addPicture, mergeSettings, fitsPanel } from "../lib/schedule.mjs";
 
 export const config = { path: "/api/frames/:id/image" };
@@ -37,6 +42,7 @@ async function deviceFetch(req, id, frame) {
     return json({ error: "unauthorized" }, 401);
   }
   const t = now();
+  frame = await purgeOldCode(id, frame);
 
   // Settings that come from the frame itself: its screen size (the hardware knows best) and the
   // orientation chosen in its setup portal (or the virtual frame's switch)
@@ -75,6 +81,7 @@ async function deviceFetch(req, id, frame) {
     "x-sleep-minutes": String(sleepMinutes),
     "x-orientation": frame.settings?.orientation || "landscape",
     "x-panel": frame.settings?.panel || "7.3",
+    ...firmwareHeaders(req.headers.get("x-fw-env"), req.headers.get("x-fw")),
   };
 
   // Never send a picture made for another screen size: the frame would reject the byte count

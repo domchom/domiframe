@@ -97,6 +97,32 @@ export async function deletePictureFiles(id, picIds) {
   await Promise.all(picIds.flatMap((p) => PICTURE_FILES.map((ext) => images().delete(`${id}/${p}.${ext}`))));
 }
 
+// When a frame makes a new code, the pictures sealed with the old one are put aside instead of
+// deleted. If the frame goes back to that code (typed into its setup portal) within
+// OLD_CODE_DAYS, they come back; after that they're deleted for good. Only the code just before
+// the current one is kept. The frame record holds oldCode: { hash, at }.
+export const OLD_CODE_DAYS = 30;
+export const asideKey = (id) => `${id}:old-code`;
+export const oldCodeFresh = (frame) => !!frame?.oldCode && now() - Date.parse(frame.oldCode.at) < OLD_CODE_DAYS * 864e5;
+
+/** Delete the pictures put aside with a frame's old code. */
+export async function deleteAside(id) {
+  const aside = await states().get(asideKey(id), { type: "json" });
+  if (!aside) return;
+  const s = normalizeState(aside);
+  await deletePictureFiles(id, [...s.pictures, ...s.trash].map((p) => p.id));
+  await states().delete(asideKey(id));
+}
+
+/** Once the old code's time is up, delete what was put aside with it. Returns the frame as saved. */
+export async function purgeOldCode(id, frame) {
+  if (!frame?.oldCode || oldCodeFresh(frame)) return frame;
+  await deleteAside(id);
+  const { oldCode, ...rest } = frame;
+  await frames().setJSON(id, rest);
+  return rest;
+}
+
 export const newKey = () => randomBytes(24).toString("base64url");
 
 // The frame code (like K7PX-92QD-M4TR-8WZN) is made by the frame itself and never reaches the

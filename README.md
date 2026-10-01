@@ -42,8 +42,8 @@ Each frame keeps up to 200 pictures, optionally sorted into folders; the frame c
 | `DELETE /api/admin/frames/:id` | admin | Delete a frame and its pictures |
 | `POST /api/admin/frames/:id/keys` `{key: "device"}` | admin | Replace the device key (old one stops working), shown once |
 | `PUT /api/admin/frames/:id/settings` | admin | Settings other than the folder, e.g. `orientation` |
-| `POST /api/frames/:id/code` `{hash}` | `X-Device-Key` | The frame registers a new code (SHA-256 of the token derived from it); clears the frame's pictures |
-| `GET /api/frames/:id/image` | `X-Device-Key` | Frame download, sealed (`ETag` / `304`, `204` if empty), always with `X-Sleep-Minutes` |
+| `POST /api/frames/:id/code` `{hash}` | `X-Device-Key` | The frame registers a new code (SHA-256 of the token derived from it); puts the frame's pictures aside for 30 days, or brings them back if it's the code from before |
+| `GET /api/frames/:id/image` | `X-Device-Key` | Frame download, sealed (`ETag` / `304`, `204` if empty), always with `X-Sleep-Minutes`, and `X-Fw-Update` etc. when newer firmware is out |
 | `POST /api/frames/:id/image` | upload key | Add a picture: packed image, preview PNG, and optionally `thumb` JPEG, original JPEG, `edits`, `from`, `album`, `queue` |
 | `GET /api/frames/:id/info` | upload key | Name, check-ins, battery, settings, picture queue |
 | `GET /api/frames/:id/preview` | upload key | PNG of the picture on the frame now |
@@ -80,7 +80,7 @@ Nobody who runs the server (including you, the developer) can see what people se
 
 The frame's code screen also has a QR code of `https://domiframe.art/f/<id>#k=<code>` (drawn with ESP-IDF's built-in QR encoder), so a phone can open the frame straight away. Codes can also be typed: the home page's **My frame** tab takes a frame ID and code (or a pasted link) and remembers frames opened on that device. Codes are forgiving about case, spaces, dashes and O/I/L (`web/code.js`). In links the code travels in the `#fragment`, which browsers never send, and the upload page removes it from the address bar once saved.
 
-**New code:** in the frame's setup portal (hold KEY3 and press reset), tick *Make a new frame code*. The old code stops working, and the frame's pictures and folders are deleted, since they were sealed with the old code. Changing the frame ID also makes a new code. If you set a frame up before gifting it, have the new owner do this so only they have the code. **Show the code again:** hold KEY1 while pressing reset.
+**New code:** in the frame's setup portal (hold KEY3 and press reset), tick *Make a new frame code*. The old code stops working. The frame's pictures and folders were sealed with the old code, so they're put away: still sealed, and back only if the frame goes back to that code (type it into the portal's *Frame code* field) within 30 days, after which they're deleted. The same field gets a wiped frame back to its code and pictures. Changing the frame ID also makes a new code. If you set a frame up before gifting it, have the new owner do this so only they have the code. **Show the code again:** hold KEY1 while pressing reset.
 
 **What this protects against:** anyone reading the stored data, the database, logs, or the admin page. **What it can't:** the server also serves the web pages, so whoever controls the site could in principle ship changed JavaScript that reads codes as they're typed. The CSP (below) stops pages loading code from anywhere else, but the site's own code has to be trusted. What the server does see: frame names, when pictures were uploaded, how many there are, and settings.
 
@@ -123,6 +123,16 @@ Save the response and enter `id` + `deviceKey` on the frame (below). The frame t
 6. **KEY1** wakes the frame to check for a new picture immediately.
 
 You can do step 3 yourself with your own Wi-Fi before gifting it; then have your friend redo setup at home and tick *Make a new frame code*, so you never know their code.
+
+## Firmware updates over Wi-Fi
+
+Frames update themselves: when a newer release is out for their build, the check-in reply offers it (`X-Fw-Update`, `X-Fw-Url`, `X-Fw-Size`, `X-Fw-Sig`), and the frame downloads it into the spare app slot, checks it, and restarts into it. The picture stays on the screen, and the frame keeps its Wi-Fi, settings and frame code, so its pictures stay too. It only installs firmware **signed with your key** (ECDSA P-256, checked against the public key built into it), only a newer version of the same build, and only with enough battery (`MIN_UPDATE_MV`). The new firmware only counts as good once it has reached the server; until then the bootloader can roll it back, where it supports that. Three failed tries at one version and the frame waits for a newer one.
+
+1. Once: `cd firmware && python3 tools/release.py keygen`. This makes the signing key at `~/.domiframe/firmware-signing-key.pem` (outside the repo: back it up, never commit it) and writes its public half into `include/fw_key.h`. Commit that file, and flash each frame **once over USB** so it has the key. Until `fw_key.h` holds a key, frames don't ask for updates.
+2. Each release: raise `FW_VERSION` in `include/config.h`, then `python3 tools/release.py publish`. It builds both screens, signs them, puts them in `web/firmware/` and lists them in `netlify/lib/firmware-releases.mjs`.
+3. Commit and push. Once Netlify deploys, each frame updates at its next check-in.
+
+Lose the key and frames can't take updates over Wi-Fi any more: make a new one with `keygen`, and flash every frame over USB again.
 
 ## Local development
 

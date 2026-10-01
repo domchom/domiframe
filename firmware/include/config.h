@@ -2,7 +2,19 @@
 
 // ---- Server ---------------------------------------------------------------
 #define SERVER_BASE "https://domiframe.art"
-#define FW_VERSION "0.6.0"
+#define FW_VERSION "0.7.0"  // tools/release.py publishes it; raise it for every release
+
+// Which build this is, so updates over Wi-Fi only ever bring the same build (platformio.ini envs)
+#if defined(DOMIFRAME_PANEL_13IN3)
+#define FW_ENV "ee02-13in3"
+#else
+#define FW_ENV "ee04"
+#endif
+
+// Updates over Wi-Fi need this much battery (millivolts): a download that dies halfway is
+// harmless, but there's no point starting one on a flat battery. Readings under 1 V mean no
+// battery is connected (running on USB), and don't count.
+#define MIN_UPDATE_MV 3550
 
 // Check the server's HTTPS certificate against Mozilla's root CAs (data/cert). 0 skips the
 // check, for debugging only: anyone on the frame's network could then read its device key.

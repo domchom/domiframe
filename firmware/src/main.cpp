@@ -15,7 +15,12 @@
 // browser with a key derived from the code (web/seal.js), so the server only ever has
 // ciphertext; the frame derives the same key and opens them here. The server only gets the
 // SHA-256 of a separate access token derived from the code (POST /api/frames/<id>/code).
-// Hold KEY1 while pressing reset to show the code again; the setup portal can make a new one.
+// Hold KEY1 while pressing reset to show the code again; the setup portal can make a new one,
+// or take back the code the frame had (the server then brings back the pictures sealed with it).
+//
+// Updates over Wi-Fi: when newer firmware for this build is out, the check-in reply says so.
+// The frame downloads it, checks its signature against FW_SIGNING_KEY (include/fw_key.h) and
+// installs it. Settings, Wi-Fi and the frame code are kept, so its pictures stay.
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -30,8 +35,12 @@
 #include <mbedtls/md.h>
 #include <mbedtls/gcm.h>
 #include <mbedtls/base64.h>
+#include <mbedtls/pk.h>
+#include <Update.h>
+#include <esp_ota_ops.h>
 #include <qrcode.h>  // ESP-IDF's QR encoder
 #include "config.h"
+#include "fw_key.h"
 
 // ---- Screen -----------------------------------------------------------------
 // W x H is the panel's own pixel layout, which is the order the server sends pictures in.
@@ -77,6 +86,10 @@ extern const uint8_t CA_BUNDLE[] asm("_binary_data_cert_x509_crt_bundle_bin_star
 // can skip the Wi-Fi scan and connect straight away (the radio is the biggest battery drain).
 RTC_DATA_ATTR uint8_t rtcBssid[6];
 RTC_DATA_ATTR int32_t rtcChannel = 0;
+// Failed tries at installing an update (a bad download, a bad signature), so a broken release
+// doesn't drain the battery retrying at every check-in. Starts over for a newer version.
+RTC_DATA_ATTR uint8_t rtcUpdateFails = 0;
+RTC_DATA_ATTR char rtcUpdateFailedVersion[16] = "";
 
 Preferences prefs;
 String frameId, deviceKey, etag;
@@ -88,6 +101,8 @@ uint32_t sleepMinutes = SLEEP_MINUTES;  // replaced by the server's X-Sleep-Minu
 // already turned for it; this only decides which way up our own messages are drawn.
 String orientation = "landscape";
 bool orientationPending = false;
+// Newer firmware the server offered at this check-in (X-Fw-Update etc.), if any
+struct { String version, url, sig; size_t size = 0; } offer;
 
 // Hung the other way from how the panel's rows run: messages are turned to read upright
 // (rotation 1, matching how the upload page turns pictures: web/dither.js toPanelOrder).
@@ -356,6 +371,22 @@ void newFrameCode() {
   saveString("etag", etag);
 }
 
+// What someone typed as a frame code -> XXXX-XXXX-XXXX-XXXX, or "" if it isn't one. Forgiving
+// like the website (web/code.js normalizeCode): any case, spaces or dashes, O/I/L as 0/1/1.
+String tidyCode(const char* typed) {
+  String c;
+  for (const char* p = typed; *p; p++) {
+    char ch = toupper((unsigned char)*p);
+    if (ch == ' ' || ch == '-') continue;
+    if (ch == 'O') ch = '0';
+    if (ch == 'I' || ch == 'L') ch = '1';
+    if (!strchr(CODE_ALPHABET, ch)) return "";
+    c += ch;
+  }
+  if (c.length() != 16) return "";
+  return c.substring(0, 4) + "-" + c.substring(4, 8) + "-" + c.substring(8, 12) + "-" + c.substring(12);
+}
+
 void hmacSha256(const uint8_t* key, size_t keyLen, const uint8_t* msg, size_t len, uint8_t out[32]) {
   mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), key, keyLen, msg, len, out);
 }
@@ -493,15 +524,22 @@ bool runSetupPortal() {
                            "<option value='landscape'") + (portrait ? "" : " selected") + ">Landscape (wide)</option>"
                            "<option value='portrait'" + (portrait ? " selected" : "") + ">Portrait (tall)</option></select>";
   WiFiManagerParameter pOrientPick(pickHtml.c_str());
+  // A wiped frame, or one given a new code by mistake, can go back to the code it had. Like the
+  // device key, never shown back.
+  WiFiManagerParameter pCode("code", frameCode.isEmpty() ? "Frame code, if it had one before (keeps its pictures)"
+                                                         : "Frame code (leave blank to keep it)",
+                             "", 24, "autocomplete='off' autocapitalize='characters' spellcheck='false'");
   WiFiManagerParameter pNewCode("newcode", "", "", 2, "type='hidden'");
   WiFiManagerParameter pNewCodePick(
       "<br><label><input type='checkbox' style='width:auto' "
       "onchange=\"document.getElementById('newcode').value=this.checked?'1':''\"> "
-      "Make a new frame code. The old code stops working and all pictures are removed.</label>");
+      "Make a new frame code. The old code stops working and its pictures are put away: "
+      "type the old code here again within 30 days to get them back.</label>");
   wm.addParameter(&pId);
   wm.addParameter(&pKey);
   wm.addParameter(&pOrientPick);
   wm.addParameter(&pOrient);
+  wm.addParameter(&pCode);
   if (!frameCode.isEmpty()) {
     wm.addParameter(&pNewCodePick);
     wm.addParameter(&pNewCode);
@@ -518,7 +556,13 @@ bool runSetupPortal() {
     saveString("id", frameId);
     wantNewCode = true;  // the code's keys are tied to the frame ID
   }
-  if (wantNewCode) saveCode("", false);  // made (and registered) once we're online
+  String typed = tidyCode(pCode.getValue());
+  if (typed.length() && typed != frameCode) {
+    saveCode(typed, true);  // registered once we're online
+    etag = "";
+  } else if (wantNewCode && typed.isEmpty()) {
+    saveCode("", false);  // made (and registered) once we're online
+  }
   if (strlen(pKey.getValue())) {
     deviceKey = pKey.getValue();
     saveString("key", deviceKey);
@@ -584,11 +628,12 @@ bool fetchAndDraw(int batteryMv) {
   http.addHeader("X-Device-Key", deviceKey);
   http.addHeader("X-Battery-Mv", String(batteryMv));
   http.addHeader("X-Fw", FW_VERSION);
+  if (sizeof FW_SIGNING_KEY > 1) http.addHeader("X-Fw-Env", FW_ENV);  // can take updates
   http.addHeader("X-Panel", PANEL_ID);  // the server makes pictures this size
   if (etag.length()) http.addHeader("If-None-Match", etag);
   if (orientationPending) http.addHeader("X-Set-Orientation", orientation);
-  const char* keep[] = {"ETag", "X-Sleep-Minutes", "X-Orientation"};
-  http.collectHeaders(keep, 3);
+  const char* keep[] = {"ETag", "X-Sleep-Minutes", "X-Orientation", "X-Fw-Update", "X-Fw-Url", "X-Fw-Size", "X-Fw-Sig"};
+  http.collectHeaders(keep, 7);
 
   int code = http.GET();
   Serial.printf("GET %s -> %d\n", url.c_str(), code);
@@ -597,6 +642,13 @@ bool fetchAndDraw(int batteryMv) {
   if (mins >= MIN_SLEEP_MINUTES && mins <= MAX_SLEEP_MINUTES) sleepMinutes = (uint32_t)mins;
 
   if (code == 200 || code == 204 || code == 304) {
+    // This firmware got through to the server: keep it (after an update, an image that can't
+    // would be rolled back to the one before, where the bootloader supports that)
+    esp_ota_mark_app_valid_cancel_rollback();
+    offer.version = http.header("X-Fw-Update");
+    offer.url = http.header("X-Fw-Url");
+    offer.sig = http.header("X-Fw-Sig");
+    offer.size = (size_t)http.header("X-Fw-Size").toInt();
     if (orientationPending) saveOrientationPending(false);  // the server has it now
     String o = http.header("X-Orientation");
     if ((o == "landscape" || o == "portrait") && o != orientation) {
@@ -668,6 +720,111 @@ bool fetchAndDraw(int batteryMv) {
   return true;
 }
 
+// ---- Updates over Wi-Fi ----------------------------------------------------------
+
+// True if sig (base64 DER) is FW_SIGNING_KEY's ECDSA signature of
+// "domiframe-fw|<build>|<version>|<sha256 of the image, hex>", as tools/release.py makes it.
+// Signing the build and version too means an image can't be passed off as another build, or
+// an old release as a new one.
+bool signatureOk(const String& version, const uint8_t imageSha[32], const String& sig) {
+  if (sizeof FW_SIGNING_KEY <= 1) return false;
+  char hex[65];
+  for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", imageSha[i]);
+  String msg = String("domiframe-fw|") + FW_ENV + "|" + version + "|" + hex;
+  uint8_t digest[32], der[128];
+  size_t derLen = 0;
+  if (mbedtls_base64_decode(der, sizeof der, &derLen, (const uint8_t*)sig.c_str(), sig.length()) != 0) return false;
+  mbedtls_md(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), (const uint8_t*)msg.c_str(), msg.length(), digest);
+  mbedtls_pk_context pk;
+  mbedtls_pk_init(&pk);
+  bool ok = mbedtls_pk_parse_public_key(&pk, (const uint8_t*)FW_SIGNING_KEY, sizeof FW_SIGNING_KEY) == 0 &&
+            mbedtls_pk_verify(&pk, MBEDTLS_MD_SHA256, digest, sizeof digest, der, derLen) == 0;
+  mbedtls_pk_free(&pk);
+  return ok;
+}
+
+// "0.7.0" -> 7000 etc., so versions compare as numbers (0 if it isn't one)
+uint32_t versionNumber(const String& v) {
+  unsigned a, b, c;
+  return sscanf(v.c_str(), "%u.%u.%u", &a, &b, &c) == 3 ? a * 1000000u + b * 1000u + c : 0;
+}
+
+// Download the firmware the server offered into the spare app slot, check it, and restart into
+// it. Anything wrong (no battery, a short download, a bad signature) leaves the running firmware
+// as it is, to try again at a later check-in. The picture on the screen stays up throughout.
+void installUpdate(int batteryMv) {
+  if (versionNumber(offer.version) <= versionNumber(FW_VERSION) || !offer.url.startsWith("/firmware/") || !offer.size) return;
+  if (batteryMv > 1000 && batteryMv < MIN_UPDATE_MV) {
+    Serial.printf("update %s waits for more battery\n", offer.version.c_str());
+    return;
+  }
+  if (offer.version != rtcUpdateFailedVersion) rtcUpdateFails = 0;
+  if (rtcUpdateFails >= 3) return;  // until a newer one, or the frame is reset
+  auto failed = [](const char* why) {
+    Serial.printf("update %s failed: %s\n", offer.version.c_str(), why);
+    strlcpy(rtcUpdateFailedVersion, offer.version.c_str(), sizeof rtcUpdateFailedVersion);
+    rtcUpdateFails++;
+  };
+  if (WiFi.status() != WL_CONNECTED && !connectWifi()) return;  // off while drawing
+
+  WiFiClientSecure client;
+  secureClient(client);
+  HTTPClient http;
+  String url = String(SERVER_BASE) + offer.url;
+  if (!http.begin(client, url)) return failed("bad link");
+  http.setTimeout(20000);
+  http.useHTTP10(true);  // no chunked replies: the stream below is the file's bytes as they are
+  int code = http.GET();
+  Serial.printf("GET %s -> %d\n", url.c_str(), code);
+  int len = http.getSize();  // -1 if the server didn't say
+  if (code != 200 || (len != -1 && len != (int)offer.size)) {
+    http.end();
+    return failed("download");
+  }
+  if (!Update.begin(offer.size, U_FLASH)) {
+    http.end();
+    return failed(Update.errorString());
+  }
+
+  mbedtls_md_context_t sha;
+  mbedtls_md_init(&sha);
+  mbedtls_md_setup(&sha, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 0);
+  mbedtls_md_starts(&sha);
+  static uint8_t chunk[4096];
+  WiFiClient* stream = http.getStreamPtr();
+  size_t got = 0;
+  uint32_t last = millis();
+  while (got < offer.size && millis() - last < 15000) {
+    int n = stream->read(chunk, min(sizeof chunk, offer.size - got));
+    if (n <= 0) {
+      delay(5);
+      continue;
+    }
+    mbedtls_md_update(&sha, chunk, n);
+    if (Update.write(chunk, n) != (size_t)n) break;
+    got += n;
+    last = millis();
+  }
+  http.end();
+  uint8_t imageSha[32];
+  mbedtls_md_finish(&sha, imageSha);
+  mbedtls_md_free(&sha);
+
+  if (got != offer.size) {
+    Update.abort();
+    return failed("short download");
+  }
+  if (!signatureOk(offer.version, imageSha, offer.sig)) {
+    Update.abort();  // never boots: the slot isn't marked
+    return failed("signature doesn't match");
+  }
+  if (!Update.end()) return failed(Update.errorString());
+  Serial.printf("updated to %s, restarting\n", offer.version.c_str());
+  Serial.flush();
+  WiFi.disconnect(true);
+  ESP.restart();
+}
+
 void goToSleep() {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
@@ -682,6 +839,10 @@ void goToSleep() {
   Serial.flush();
   esp_deep_sleep_start();
 }
+
+// The Arduino core would mark new firmware as good as soon as it starts. Wait until it has
+// reached the server instead (fetchAndDraw), so a broken update can be rolled back.
+extern "C" bool verifyRollbackLater() { return true; }
 
 // ---------------------------------------------------------------------------
 
@@ -726,6 +887,7 @@ void setup() {
 
   bool drew = fetchAndDraw(mv);
   if (!drew && wantSetup) showCodeScreen();  // what someone needs to send the first picture
+  if (offer.version.length()) installUpdate(mv);  // restarts into the new firmware if it works
   goToSleep();
 }
 
