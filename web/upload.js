@@ -1,4 +1,4 @@
-import { sizeFor, toPanelOrder, panelOf, DEFAULTS, ditherToPalette, pack, indicesToRGBA } from "./dither.js";
+import { sizeFor, toPanelOrder, panelOf, DEFAULTS, ditherWithPreview, pack, indicesToRGBA, PALETTE } from "./dither.js";
 import { ask, tell } from "./dialog.js";
 import { ago, until, batteryPct, LOW_BATTERY_PCT, rotateLabel, checkLabel, hourLabel } from "./format.js";
 import { rememberFrame, rememberedFrames, isFrameCode, normalizeCode, frameLink } from "./code.js";
@@ -25,7 +25,8 @@ let auth = {};
 let contentKey = null; // CryptoKey for sealing and opening this frame's pictures and names
 let source = null; // ImageBitmap or canvas (after rotating)
 let packed = null;
-let dithered = null; // last dithered ImageData, restored after "compare"
+let dithered = null; // last dithered ImageData: what's sent (the preview and thumbnail files)
+let shown = null; // what the editor shows: the adjusted photo, not dithered; restored after "compare"
 let pan = { x: 0, y: 0 }; // offset in preview pixels (the current photo's)
 let dragging = false, comparing = false;
 
@@ -754,28 +755,30 @@ function pumpDither() {
   if (worker) {
     worker.postMessage({ id, rgba, w, h, opts: o }, [rgba.buffer]);
   } else {
-    setTimeout(() => finishDither(ditherToPalette(rgba, w, h, o)), 0);
+    setTimeout(() => finishDither(ditherWithPreview(rgba, w, h, o)), 0);
   }
 }
 
-function finishDither(idx) {
+function finishDither({ idx, shown }) {
   const job = active;
   active = null;
   if (job) {
-    job.apply(idx);
+    job.apply(idx, shown);
     job.resolve(true);
   }
   pumpDither();
 }
-if (worker) worker.onmessage = ({ data }) => finishDither(data.idx);
+if (worker) worker.onmessage = ({ data }) => finishDither(data);
 
 // The positioned photo only changes with cropping settings, so light and color sliders reuse it
 // instead of redrawing a big photo each time.
 let composed = { key: "", img: null };
 
 /**
- * Show the current photo. quick: the undithered photo (while dragging or comparing).
- * Returns a promise that settles once this render's dithered result is on screen (or superseded).
+ * Show the current photo. quick: the plain photo, before adjustments (while dragging or comparing).
+ * Otherwise the adjusted photo with its label, not dithered (see ditherWithPreview), while the
+ * dithered version to send is made alongside. Returns a promise that settles once this render's
+ * result is on screen (or superseded).
  */
 function render(quick = false) {
   if (!source) return Promise.resolve(false);
@@ -798,10 +801,21 @@ function render(quick = false) {
   const portrait = o.portrait;
   return new Promise((resolve) => submitDither({
     id: ++jobId, rgba: new Uint8ClampedArray(img.data), w, h, o, resolve,
-    apply(idx) {
-      if (label.title || label.meta) stampLabel(idx, w, h, label);
+    apply(idx, photo) {
+      if (label.title || label.meta) {
+        stampLabel(idx, w, h, label);
+        // The label in whole inks over the photo, as the frame will draw it
+        const marks = new Uint8Array(w * h).fill(255);
+        stampLabel(marks, w, h, label);
+        for (let i = 0; i < marks.length; i++) {
+          if (marks[i] === 255) continue;
+          const [r, g, b] = PALETTE[marks[i]].rgb;
+          photo[i * 4] = r; photo[i * 4 + 1] = g; photo[i * 4 + 2] = b;
+        }
+      }
       dithered = new ImageData(indicesToRGBA(idx), w, h);
-      if (pv.width === w && pv.height === h && !comparing) pv.getContext("2d").putImageData(dithered, 0, 0);
+      shown = new ImageData(photo, w, h);
+      if (pv.width === w && pv.height === h && !comparing) pv.getContext("2d").putImageData(shown, 0, 0);
       packed = pack(toPanelOrder(idx, w, h, panel));
     },
   }));
@@ -1484,7 +1498,7 @@ const endDrag = () => {
 pv.addEventListener("pointerup", endDrag);
 pv.addEventListener("pointercancel", endDrag);
 
-// Hold to compare with the photo before adjustments and dithering.
+// Hold to compare with the photo before adjustments.
 const cmp = $("compare");
 cmp.addEventListener("pointerdown", (e) => {
   comparing = true;
@@ -1494,7 +1508,7 @@ cmp.addEventListener("pointerdown", (e) => {
 const endCompare = () => {
   if (!comparing) return;
   comparing = false;
-  if (dithered) pv.getContext("2d").putImageData(dithered, 0, 0);
+  if (shown) pv.getContext("2d").putImageData(shown, 0, 0);
 };
 cmp.addEventListener("pointerup", endCompare);
 cmp.addEventListener("pointercancel", endCompare);
@@ -1558,17 +1572,20 @@ async function originalOf(p) {
   return new Promise((r) => c.toBlob(r, "image/jpeg", 0.88));
 }
 
-/** The dithered preview scaled so its long side is at most `max` px. */
+/** The dithered picture (not the editor's preview) scaled so its long side is at most `max` px. */
 function scaledPreview(max) {
-  const pv = $("preview");
-  const k = max / Math.max(pv.width, pv.height);
-  if (k >= 1) return pv;
+  const full = document.createElement("canvas");
+  full.width = dithered.width;
+  full.height = dithered.height;
+  full.getContext("2d").putImageData(dithered, 0, 0);
+  const k = max / Math.max(full.width, full.height);
+  if (k >= 1) return full;
   const c = document.createElement("canvas");
-  c.width = Math.round(pv.width * k);
-  c.height = Math.round(pv.height * k);
+  c.width = Math.round(full.width * k);
+  c.height = Math.round(full.height * k);
   const ctx = c.getContext("2d");
   ctx.imageSmoothingQuality = "high"; // averages the ink dots back into a smooth little picture
-  ctx.drawImage(pv, 0, 0, c.width, c.height);
+  ctx.drawImage(full, 0, 0, c.width, c.height);
   return c;
 }
 const toBlob = (canvas, type, quality) => new Promise((r) => canvas.toBlob(r, type, quality));
@@ -1621,7 +1638,9 @@ $("send").addEventListener("click", async () => {
       if (!packed) return;
       msg(editing ? "Saving…" : "Sending…");
       await sendUpload(await prepareUpload());
-      msg(editing ? "Saved." : "Sent! The frame will show it at its next check-in. To change it later, select it above and press Edit.", "ok");
+      msg(editing
+        ? "Saved. If it's on the frame, it redraws at the next check-in. Press the button on the frame to update it now."
+        : "Sent! The frame will show it at its next check-in; press the button on the frame to show it now. To change it later, select it above and press Edit.", "ok");
       clearEditor();
     }
   } catch (err) {
@@ -1673,7 +1692,8 @@ async function sendBatch() {
     $("editor").classList.remove("sending");
   }
   const verb = editing ? "Saved" : "Sent";
-  msg(`${verb} ${plural(sent, editing ? "picture" : "photo")}` + (failed ? `; ${failed} couldn't be opened or sent.` : "."), failed ? "err" : "ok");
+  msg(`${verb} ${plural(sent, editing ? "picture" : "photo")}` + (failed ? `; ${failed} couldn't be opened or sent.` : ".") +
+    (sent ? " They reach the frame at its next check-in; press the button on the frame to update it now." : ""), failed ? "err" : "ok");
   if (!failed) clearEditor();
 }
 

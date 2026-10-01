@@ -232,6 +232,16 @@ export function floatToRGBA(buf) {
   return out;
 }
 
+/**
+ * For the editor: the palette indices to send, and the adjusted photo to show instead of them.
+ * The preview isn't dithered: a screen can't show the inks the way e-paper does, so dots there
+ * would suggest an accuracy they don't have.
+ */
+export function ditherWithPreview(rgba, w, h, opts = {}) {
+  const shown = floatToRGBA(adjust(rgba, w, h, { ...DEFAULTS, ...opts }));
+  return { idx: ditherToPalette(rgba, w, h, opts), shown };
+}
+
 /** w×h indices turned 90° clockwise -> h×w. */
 export function rotateCW(idx, w, h) {
   const out = new Uint8Array(w * h);

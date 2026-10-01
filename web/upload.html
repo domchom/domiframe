@@ -107,7 +107,7 @@
     <section class="card">
       <div class="section-head">
         <h2 class="section-title">Add pictures</h2>
-        <p class="meta">Photos are turned into the frame's six inks right here, before sending.</p>
+        <p class="meta">Photos are turned into the frame's six inks right here, as they're sent.</p>
       </div>
       <div class="pickers">
         <label class="picker">
@@ -130,7 +130,7 @@
           <div class="print"><canvas id="preview" class="preview" aria-label="Preview of how it will look on the frame"></canvas></div>
           <p class="hint"><span id="drag-hint">Drag to reposition</span>
             <button type="button" id="compare" class="link">Hold to see original</button></p>
-          <p class="muted small preview-note">This preview is a close guide, not an exact match: colors and contrast on the frame's e-paper screen may look different, depending on its light and viewing angle.</p>
+          <p class="muted small preview-note">The preview is a guide: it isn't dithered, and colors on the frame's e-paper screen vary with its light and viewing angle.</p>
           <div class="filmstrip batch-only">
             <button type="button" id="prev" class="arrow" aria-label="Previous photo">‹</button>
             <div id="strip" class="strip" aria-label="Photos to send"></div>
@@ -251,7 +251,7 @@
             <label class="slider">Dither strength <output for="strength"></output>
               <input type="range" class="adj" id="strength" min="0.3" max="1" step="0.05">
             </label>
-            <p class="tip">The frame has six inks, so dithering mixes dots of them to fake every other color. Which style looks best depends on the photo.</p>
+            <p class="tip">The frame has six inks, so dithering mixes dots of them to fake every other color. It's done when you send: the preview shows your adjustments without the dots, because a screen can't show them the way e-paper does. Which style looks best depends on the photo; check the result on the frame, and edit it again if you'd like another.</p>
           </div>
           <div class="panel" data-panel="text" role="tabpanel" hidden>
             <label class="slider">Caption
