@@ -1,7 +1,9 @@
 // Which picture a frame shows, and when it should wake next. Pure functions, no storage.
 //
 // Frame state:
-//   pictures   [{id, uploadedAt, from, etag, album, hasOriginal, edits}], oldest first
+//   pictures   [{id, uploadedAt, from, etag, album, hasOriginal, edits, day?}], oldest first
+//              day: "MM-DD" (every year) or "YYYY-MM-DD" (once): shown only on that day
+//   trash      removed pictures, [{...picture, removedAt}], kept TRASH_DAYS so they can be restored
 //   albums     [{id, name, createdAt}]  (folders; a picture is in at most one)
 //   current    id of the picture on the frame (null before the first one)
 //   since      ISO time `current` went up
@@ -16,6 +18,9 @@ export const MAX_PICTURES = 200;
 export const MAX_ALBUMS = 50;
 export const LOW_BATTERY_MV = 3450;
 export const ALBUM_ID_RE = /^[a-z0-9]{6,20}$/;
+export const TRASH_DAYS = 30;
+export const MAX_TRASH = 100; // beyond this the oldest are deleted for good, to bound storage
+export const DAY_RE = /^(\d{4}-)?(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 export const PANEL_IDS = ["7.3", "13.3"]; // see PANELS in web/dither.js
 
@@ -33,7 +38,7 @@ export const DEFAULT_SETTINGS = {
 };
 
 export const emptyState = () => ({
-  pictures: [], albums: [], current: null, since: null, seen: [], showNext: null, onDemand: false, bag: [],
+  pictures: [], albums: [], current: null, since: null, seen: [], showNext: null, onDemand: false, bag: [], trash: [],
 });
 
 /** Older states lack newer fields. */
@@ -86,6 +91,20 @@ export function mergeSettings(current, update) {
   return { settings: s };
 }
 
+/** The local date at `ms` in `tz`, as "YYYY-MM-DD". */
+export function localDate(ms, tz) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(ms);
+}
+
+/** Is a picture's day ("MM-DD" every year, or "YYYY-MM-DD") the date `ymd`? Feb 29 shows on Feb 28 in other years. */
+export function isPictureDay(day, ymd) {
+  if (!day) return false;
+  if (day.length === 10) return day === ymd;
+  const md = ymd.slice(5), year = Number(ymd.slice(0, 4));
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  return day === md || (day === "02-29" && !leap && md === "02-28");
+}
+
 export function localHour(ms, tz) {
   const h = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", hourCycle: "h23" }).format(ms);
   return Number(h) % 24;
@@ -100,10 +119,13 @@ export function inQuietHours(ms, s) {
 /** A picture made for this frame's screen size (older pictures were all 7.3"). */
 export const fitsPanel = (pic, settings) => (pic.panel || "7.3") === (settings?.panel || DEFAULT_SETTINGS.panel);
 
-/** The pictures the frame cycles through: the chosen folder, or everything, for its screen size. */
+/**
+ * The pictures the frame cycles through: the chosen folder, or everything, for its screen size.
+ * Pictures set for a day stay out: they only show on their day (see choosePicture).
+ */
 export function pool(state, settings) {
   const album = settings?.album;
-  const sized = state.pictures.filter((p) => fitsPanel(p, settings));
+  const sized = state.pictures.filter((p) => fitsPanel(p, settings) && !p.day);
   if (!album || !state.albums.some((a) => a.id === album)) return sized;
   return sized.filter((p) => p.album === album);
 }
@@ -111,8 +133,9 @@ export function pool(state, settings) {
 /**
  * Decide what the frame should show at `now` (ms):
  *   1. a picture asked for with "show next"
- *   2. new pictures in the cycling folder, oldest first, so a burst of uploads each get a turn
- *   3. the next picture in the folder when the rotation is due (in order or shuffled)
+ *   2. pictures set for today (in the frame's time zone), taking turns if there are several
+ *   3. new pictures in the cycling folder, oldest first, so a burst of uploads each get a turn
+ *   4. the next picture in the folder when the rotation is due (in order or shuffled)
  * Returns { state, changed }.
  */
 export function choosePicture(inState, settings, now, rng = Math.random) {
@@ -137,19 +160,30 @@ export function choosePicture(inState, settings, now, rng = Math.random) {
   if (!state.pictures.length) {
     return { state: { ...state, current: null, since: null, onDemand: false }, changed: changed || state.current !== null };
   }
-  const pics = pool(state, s);
-  if (!pics.length) return { state, changed }; // empty folder: keep what's up
-
   const elapsed = now - Date.parse(state.since || 0);
   const due = s.rotateHours > 0 && elapsed >= s.rotateHours * 3600e3 * 0.95; // 5% early: the sleep timer drifts
+
+  // A picture "show next" put up today stays until its turn ends, even on a picture's day
+  const today = localDate(now, s.tz);
+  const todays = state.pictures.filter((p) => fitsPanel(p, s) && isPictureDay(p.day, today));
+  if (todays.length && !(state.onDemand && !due && state.pictures.some((p) => p.id === state.current))) {
+    const i = todays.findIndex((p) => p.id === state.current);
+    if (i === -1) return show(todays[0].id);
+    if (due && todays.length > 1) return show(todays[(i + 1) % todays.length].id);
+    return { state, changed };
+  }
+
+  const pics = pool(state, s);
+  if (!pics.length) return { state, changed }; // empty folder: keep what's up
   const unseen = pics.find((p) => !state.seen.includes(p.id));
   const idx = pics.findIndex((p) => p.id === state.current);
 
   if (idx === -1) {
     // Something outside the folder is up. A "show next" pick stays until the rotation is due;
     // otherwise (deleted, folder switched, first run) move into the folder now.
-    const onFrame = state.pictures.some((p) => p.id === state.current);
-    if (onFrame && state.onDemand && !due && !unseen) return { state, changed };
+    // A picture whose day is over leaves straight away.
+    const up = state.pictures.find((p) => p.id === state.current);
+    if (up && !up.day && state.onDemand && !due && !unseen) return { state, changed };
     return show((unseen || pickNext(pics, -1)).id);
   }
   if (unseen) return show(unseen.id);
@@ -196,24 +230,68 @@ export function nextWakeMinutes(inState, settings, now, batteryMv) {
 
 // ---- Editing the picture list ------------------------------------------------
 
-/** Add a picture, dropping the oldest (never the current one) beyond MAX_PICTURES. Returns removed ids. */
-export function addPicture(inState, pic) {
+/**
+ * Add a picture. Beyond MAX_PICTURES the oldest (never the current one) moves to the trash.
+ * Returns { state, removed }: ids whose files can go (pushed out of a full trash).
+ */
+export function addPicture(inState, pic, now = Date.now()) {
   const state = normalizeState(inState);
   const pictures = [...state.pictures, pic];
-  const removed = [];
-  while (pictures.length > MAX_PICTURES) {
-    const i = pictures.findIndex((p) => p.id !== state.current);
-    removed.push(pictures.splice(i, 1)[0].id);
+  const over = [];
+  for (const p of pictures) {
+    if (pictures.length - over.length <= MAX_PICTURES) break;
+    if (p.id !== state.current) over.push(p.id);
   }
-  return { state: forget(state, removed, pictures), removed };
+  return removePictures({ ...state, pictures }, over, now);
 }
 
-export function removePictures(inState, ids) {
+/**
+ * Move pictures to the trash, where they can be restored for TRASH_DAYS.
+ * Returns { state, removed }: ids whose files can be deleted now (pushed out of a full trash).
+ */
+export function removePictures(inState, ids, now = Date.now()) {
   const state = normalizeState(inState);
   const gone = new Set(ids);
-  return forget(state, ids, state.pictures.filter((p) => !gone.has(p.id)));
+  const removedAt = new Date(now).toISOString();
+  const binned = state.pictures.filter((p) => gone.has(p.id)).map((p) => ({ ...p, removedAt }));
+  const trash = [...state.trash, ...binned];
+  const overflow = trash.splice(0, Math.max(0, trash.length - MAX_TRASH)).map((p) => p.id);
+  return { state: forget({ ...state, trash }, ids, state.pictures.filter((p) => !gone.has(p.id))), removed: overflow };
 }
-export const removePicture = (state, id) => removePictures(state, [id]);
+
+export const removePicture = (state, id) => removePictures(state, [id]).state;
+
+/** Put pictures from the trash back, in their old folder if it still exists. Null if there's no room. */
+export function restorePictures(inState, ids) {
+  const state = normalizeState(inState);
+  const back = new Set(ids);
+  const restored = state.trash.filter((p) => back.has(p.id))
+    .map(({ removedAt, ...p }) => ({ ...p, album: state.albums.some((a) => a.id === p.album) ? p.album : null }));
+  if (!restored.length || state.pictures.length + restored.length > MAX_PICTURES) return null;
+  // Back in upload order, and counted as seen, so they don't all jump the queue
+  const pictures = [...state.pictures, ...restored].sort((a, b) => a.uploadedAt.localeCompare(b.uploadedAt) || a.id.localeCompare(b.id));
+  return {
+    ...state, pictures, trash: state.trash.filter((p) => !back.has(p.id)),
+    seen: [...new Set([...state.seen, ...restored.map((p) => p.id)])],
+  };
+}
+
+/** Delete pictures in the trash for good: the ones in `ids`, or those older than TRASH_DAYS. Returns { state, removed }. */
+export function emptyTrash(inState, ids, now = Date.now()) {
+  const state = normalizeState(inState);
+  const cutoff = now - TRASH_DAYS * 864e5;
+  const go = ids ? new Set(ids) : null;
+  const removed = state.trash.filter((p) => (go ? go.has(p.id) : Date.parse(p.removedAt) < cutoff)).map((p) => p.id);
+  if (!removed.length) return { state, removed };
+  return { state: { ...state, trash: state.trash.filter((p) => !removed.includes(p.id)) }, removed };
+}
+
+/** Set or clear the day pictures show on ("MM-DD", "YYYY-MM-DD" or null). */
+export function setPictureDay(inState, ids, day) {
+  const state = normalizeState(inState);
+  const set = new Set(ids);
+  return { ...state, pictures: state.pictures.map((p) => (set.has(p.id) ? { ...p, day: day || undefined } : p)) };
+}
 
 function forget(state, ids, pictures) {
   const gone = new Set(ids);
@@ -233,7 +311,7 @@ export function replacePicture(inState, oldId, pic) {
   if (i === -1) return null;
   const old = state.pictures[i];
   const pictures = [...state.pictures];
-  pictures[i] = { ...pic, album: old.album, from: old.from, uploadedAt: old.uploadedAt, editedAt: pic.uploadedAt };
+  pictures[i] = { ...pic, album: old.album, from: old.from, day: old.day, uploadedAt: old.uploadedAt, editedAt: pic.uploadedAt };
   const swap = (id) => (id === oldId ? pic.id : id);
   return {
     ...state,
@@ -261,11 +339,11 @@ export function renameAlbum(inState, albumId, name) {
   return { ...state, albums: state.albums.map((a) => (a.id === albumId ? { ...a, name } : a)) };
 }
 
-/** Delete a folder. Its pictures are deleted too, or kept (unfiled). Returns { state, removed }. */
-export function deleteAlbum(inState, albumId, deletePictures) {
+/** Delete a folder. Its pictures go to the trash too, or are kept (unfiled). Returns { state, removed }. */
+export function deleteAlbum(inState, albumId, deletePictures, now = Date.now()) {
   let state = normalizeState(inState);
   const inside = state.pictures.filter((p) => p.album === albumId).map((p) => p.id);
   state = { ...state, albums: state.albums.filter((a) => a.id !== albumId) };
-  if (deletePictures) return { state: removePictures(state, inside), removed: inside };
+  if (deletePictures) return removePictures(state, inside, now);
   return { state: movePictures(state, inside, null), removed: [] };
 }

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   choosePicture, nextWakeMinutes, addPicture, removePicture, mergeSettings, inQuietHours,
   emptyState, MAX_PICTURES, replacePicture, movePictures, deleteAlbum, addAlbum,
+  removePictures, restorePictures, emptyTrash, setPictureDay, isPictureDay, pool, TRASH_DAYS, MAX_TRASH,
 } from "../netlify/lib/schedule.mjs";
 
 const H = 3600e3;
@@ -163,7 +164,8 @@ test("moving pictures and deleting folders", () => {
   assert.deepEqual(r.removed, []);
   assert.ok(r.state.pictures.find((p) => p.id === "a").album === null, "kept, unfiled");
   r = deleteAlbum(filed(), "beach0", true);
-  assert.deepEqual(r.removed, ["a", "c"]);
+  assert.deepEqual(r.removed, [], "nothing deleted for good yet");
+  assert.deepEqual(r.state.trash.map((p) => p.id), ["a", "c"]);
   assert.equal(r.state.pictures.length, 2);
   assert.equal(r.state.albums.length, 1);
 });
@@ -187,4 +189,60 @@ test("settings validate folder and order", () => {
   assert.ok(mergeSettings({}, { album: "../x" }).error);
   assert.ok(mergeSettings({}, { order: "random" }).error);
   assert.equal(mergeSettings({ album: "beach0" }, { album: null }).settings.album, null);
+});
+
+test("pictures for a day: only on that day, in the frame's time zone, then back to the rotation", () => {
+  // T0 is 2026-06-01 12:00 UTC
+  let state = setPictureDay({ ...withPics("a", "b", "bday"), current: "a", since: new Date(T0).toISOString(), seen: ["a", "b"] }, ["bday"], "06-02");
+  const s = { rotateHours: 24, tz: "UTC" };
+  assert.deepEqual(pool(state, s).map((p) => p.id), ["a", "b"], "not in the rotation");
+  assert.equal(choosePicture(state, s, T0).changed, false, "not its day yet, and new or not it waits");
+  let r = choosePicture(state, s, T0 + 12.5 * H); // 06-02 00:30 UTC
+  assert.equal(r.state.current, "bday");
+  r = choosePicture(r.state, s, T0 + 20 * H);
+  assert.equal(r.changed, false, "stays all day");
+  r = choosePicture(r.state, s, T0 + 36.5 * H); // 06-03
+  assert.notEqual(r.state.current, "bday", "leaves when its day is over");
+  // Tokyo is 9 hours ahead: already 06-02 there at T0 + 3 h
+  assert.equal(choosePicture(state, { ...s, tz: "Asia/Tokyo" }, T0 + 3 * H).state.current, "bday");
+  // several on one day take turns on the rotation schedule
+  state = setPictureDay(state, ["b"], "2026-06-02");
+  r = choosePicture(state, s, T0 + 12.5 * H);
+  assert.equal(r.state.current, "b");
+  r = choosePicture(r.state, s, T0 + 12.5 * H + 24 * H * 0.5);
+  assert.equal(r.changed, false);
+  // a one-off date doesn't come back next year; a yearly one does
+  assert.ok(!isPictureDay("2026-06-02", "2027-06-02"));
+  assert.ok(isPictureDay("06-02", "2027-06-02"));
+  assert.ok(isPictureDay("02-29", "2027-02-28"), "Feb 29 shows on Feb 28 in other years");
+  assert.ok(!isPictureDay("02-29", "2028-02-28"));
+  assert.equal(setPictureDay(state, ["bday"], null).pictures.find((p) => p.id === "bday").day, undefined);
+});
+
+test("removed pictures go to the trash: restore, empty, expire, overflow", () => {
+  const t = T0;
+  let state = { ...withPics("a", "b", "c"), albums: [{ id: "beach0", name: "x" }] };
+  state = movePictures(state, ["a"], "beach0");
+  let r = removePictures(state, ["a", "b"], t);
+  assert.deepEqual(r.removed, []);
+  assert.deepEqual(r.state.pictures.map((p) => p.id), ["c"]);
+  assert.deepEqual(r.state.trash.map((p) => [p.id, p.removedAt]), [["a", new Date(t).toISOString()], ["b", new Date(t).toISOString()]]);
+  // restore puts them back in upload order and their folder, if it still exists
+  state = restorePictures({ ...r.state, albums: [] }, ["a"]);
+  assert.deepEqual(state.pictures.map((p) => [p.id, p.album]), [["a", null], ["c", undefined]]);
+  assert.deepEqual(state.trash.map((p) => p.id), ["b"]);
+  assert.ok(state.seen.includes("a"), "doesn't jump the queue");
+  assert.equal(restorePictures(state, ["zz"]), null);
+  // expire after TRASH_DAYS, or empty on demand
+  assert.deepEqual(emptyTrash(state, null, t + (TRASH_DAYS - 1) * 24 * H).removed, []);
+  assert.deepEqual(emptyTrash(state, null, t + (TRASH_DAYS + 1) * 24 * H).removed, ["b"]);
+  assert.deepEqual(emptyTrash(state, ["b"], t).state.trash, []);
+  // a full trash deletes the oldest for good
+  let big = withPics(...Array.from({ length: MAX_TRASH + 2 }, (_, i) => `p${i}`));
+  r = removePictures(big, big.pictures.map((p) => p.id), t);
+  assert.deepEqual(r.removed, ["p0", "p1"]);
+  assert.equal(r.state.trash.length, MAX_TRASH);
+  // no room to restore into a full frame
+  const full = { ...withPics(...Array.from({ length: MAX_PICTURES }, (_, i) => `q${i}`)), trash: [{ ...pic("x"), removedAt: "" }] };
+  assert.equal(restorePictures(full, ["x"]), null);
 });

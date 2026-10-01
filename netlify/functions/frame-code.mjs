@@ -27,7 +27,7 @@ export default async (req, context) => {
   // Stop the old code first, then clear what was sealed with it
   await frames().setJSON(id, { ...frame, uploadKeyHash: hash, codeClaimedAt: new Date(now()).toISOString(), settings: { ...frame.settings, album: null } });
   const old = await loadState(id);
-  await deletePictureFiles(id, old.pictures.map((p) => p.id));
+  await deletePictureFiles(id, [...old.pictures, ...old.trash].map((p) => p.id));
   await states().delete(id);
   return json({ ok: true, cleared: old.pictures.length });
 };

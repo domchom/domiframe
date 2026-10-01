@@ -247,6 +247,12 @@ button.link:hover { text-decoration-thickness: 2px; }
 .seg label:hover span { background: radial-gradient(var(--soft-line) .8px, transparent 1px) 0 0 / 3px 3px; }
 .seg input:checked + span { background: var(--ink); color: var(--surface); }
 .seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -4px; }
+/* Which corner the picture's label goes in: laid out like the corners themselves */
+.seg.corners { display: grid; grid-template-columns: 1fr 1fr; }
+.seg.corners label:nth-child(odd) + label span { border-left: 1.5px solid var(--ink); }
+.seg.corners label:nth-child(3) span { border-left: 0; }
+.seg.corners label:nth-child(n+3) span { border-top: 1.5px solid var(--ink); }
+.label-where { margin: 18px 0 8px; }
 
 .slider { display: block; font-size: 14px; color: var(--muted); margin: 16px 0; }
 .slider output { float: right; color: var(--ink); font: 12px/1.8 var(--mono); }
@@ -490,6 +496,24 @@ input[type=range]:active::-moz-range-thumb { background: var(--accent); border-c
 }
 .queue li > span { font: 11px/1.5 var(--mono); color: var(--muted); }
 .queue li.badged > span::first-line { color: var(--accent); }
+/* Recently removed: the prints faded, as if half the ink were gone */
+.in-trash .queue .pick img { opacity: .55; }
+
+/* Undo after removing: a note with a red rule, like the orientation warning */
+.undo-bar {
+  display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: 14px; margin: 0 0 16px;
+  padding: 8px 12px; border: 1.5px solid var(--ink); border-left-width: 6px; background: var(--field);
+}
+
+/* Invite: the frame's link as a QR code */
+.title-block .invite { margin-top: 12px; }
+.invite-box { display: grid; justify-items: center; gap: 14px; margin: 0 0 16px; }
+.qr { width: min(240px, 100%); height: auto; image-rendering: pixelated; border: 2px solid var(--ink); }
+
+/* Dialogs with extra content */
+.ask-body { margin: 0 0 16px; }
+.day-pick .slider { margin-top: 0; }
+.day-pick .seg { margin: 12px 0 0; }
 
 /* ---- Frame settings ------------------------------------------------------------ */
 
@@ -605,6 +629,7 @@ details > summary .meta { margin: 0; }
   .brand h1 { font-size: 40px; }
   .title-block { display: flex; align-items: baseline; gap: 6px 20px; flex-wrap: wrap; }
   .title-block .eyebrow { flex-basis: 100%; }
+  .title-block .invite { margin: 0 0 0 auto; align-self: center; }
 
   /* Now showing: the print, its spec sheet beside it */
   .now { grid-template-columns: minmax(0, 1fr) 300px; gap: 40px; align-items: start; }

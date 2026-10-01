@@ -17,7 +17,7 @@ Frame (wakes on schedule or KEY1) ──GET + ETag────────┘
    Every reply says how long to sleep (X-Sleep-Minutes)
 ```
 
-Each frame keeps up to 200 pictures, optionally sorted into folders; the frame cycles through one folder or all of them, in order or shuffled. New ones go up at the next check-in; any picture can be put up next on demand; otherwise the frame rotates through them on a schedule (every hour, 3/6/12 hours, day, 3 days, week, or only when something new arrives). The server also decides when the frame wakes next: the check-in interval, quiet hours overnight, and fewer check-ins when the battery is low. All of this is set per frame on the upload or admin page, with no reflashing.
+Each frame keeps up to 200 pictures, optionally sorted into folders; the frame cycles through one folder or all of them, in order or shuffled. New ones go up at the next check-in; any picture can be put up next on demand, or set to show only on a day (a birthday, every year); otherwise the frame rotates through them on a schedule (every hour, 3/6/12 hours, day, 3 days, week, or only when something new arrives). The server also decides when the frame wakes next: the check-in interval, quiet hours overnight, and fewer check-ins when the battery is low. Removed pictures stay in Recently removed for 30 days, so they can be put back. All of this is set per frame on the upload or admin page, with no reflashing.
 
 ## Repo layout
 
@@ -53,9 +53,12 @@ Each frame keeps up to 200 pictures, optionally sorted into folders; the frame c
 | `GET /api/frames/:id/pictures/:pic/original` | upload key | The photo as uploaded (JPEG), for editing again |
 | `PUT /api/frames/:id/pictures/:pic` | upload key | Replace with an edited version (keeps place and folder) |
 | `POST /api/frames/:id/pictures/:pic/show` | upload key | Put it up at the next check-in |
-| `DELETE /api/frames/:id/pictures/:pic` | upload key | Remove one picture |
-| `DELETE /api/frames/:id/pictures` `{ids}\|{album}\|{all: true}` | upload key | Remove several |
+| `DELETE /api/frames/:id/pictures/:pic` | upload key | Remove one picture (to the trash) |
+| `DELETE /api/frames/:id/pictures` `{ids}\|{album}\|{all: true}` | upload key | Remove several (to the trash); returns their `ids` |
 | `PATCH /api/frames/:id/pictures` `{ids, album}` | upload key | Move to a folder (`album: null` = none) |
+| `PATCH /api/frames/:id/pictures` `{ids, day}` | upload key | Show only on a day: `"MM-DD"` every year, `"YYYY-MM-DD"` once, `null` = any day |
+| `POST /api/frames/:id/restore` `{ids}` | upload key | Put pictures back from the trash |
+| `DELETE /api/frames/:id/trash` `{ids}\|{all: true}` | upload key | Delete pictures in the trash for good (otherwise after 30 days) |
 | `POST /api/frames/:id/albums` `{name}` | upload key | New folder |
 | `PATCH`/`DELETE /api/frames/:id/albums/:album` | upload key | Rename / delete (`?pictures=keep\|delete`) |
 

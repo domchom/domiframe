@@ -182,6 +182,7 @@ export async function frameSummary(id, frame) {
     showNext: state.showNext,
     albums: state.albums.map((a) => ({ ...a, count: state.pictures.filter((p) => p.album === a.id).length })),
     pictures: state.pictures.map((p) => ({ ...p, seen: state.seen.includes(p.id) })),
+    trash: state.trash, // removed, restorable until removedAt + TRASH_DAYS
   };
 }
 

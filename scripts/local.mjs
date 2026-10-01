@@ -37,7 +37,7 @@ function route(pathname) {
   if ((m = pathname.match(/^\/api\/admin\/frames(?:\/([^/]+)(?:\/(?:keys|settings))?)?$/))) return { fn: admin, params: m[1] ? { id: m[1] } : {} };
   if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/image$/))) return { fn: frameImage, params: { id: m[1] } };
   if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/code$/))) return { fn: frameCode, params: { id: m[1] } };
-  if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/(?:info|preview|settings|pictures(?:\/[^/]+){0,2}|albums(?:\/[^/]+)?)$/))) {
+  if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/(?:info|preview|settings|restore|trash|pictures(?:\/[^/]+){0,2}|albums(?:\/[^/]+)?)$/))) {
     return { fn: frameInfo, params: { id: m[1] } };
   }
   return null;

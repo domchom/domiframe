@@ -241,7 +241,7 @@ test("full flow: create frame, frame makes its code, queue pictures, rotate, set
 
   // delete the picture on the frame: the frame moves to the other one
   assert.equal((await f.call(`pictures/${first.id}`, { method: "DELETE" })).status, 200);
-  assert.equal((await f.call(`pictures/${first.id}`)).status, 404);
+  assert.deepEqual((await f.info()).trash.map((p) => p.id), [first.id], "kept in the trash for now");
   res = await f.dev({ "if-none-match": etag1 });
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("etag"), etag2);
@@ -393,6 +393,40 @@ test("folders, show next, replace, bulk move and delete", async () => {
   assert.equal((await dev()).status, 204);
 });
 
+test("the trash and pictures for a day, through the API", async () => {
+  const f = await newFrame("dora");
+  const { call, info } = f;
+  const a = await f.upload(0x11), b = await f.upload(0x22), c = await f.upload(0x33);
+
+  // removing moves to the trash; the files stay so it can come back
+  assert.deepEqual(await (await call("pictures", jsonBody("DELETE", { ids: [a.id, b.id] }))).json(), { ok: true, removed: 2, ids: [a.id, b.id] });
+  let i = await info();
+  assert.deepEqual(i.pictures.map((p) => p.id), [c.id]);
+  assert.deepEqual(i.trash.map((p) => p.id), [a.id, b.id]);
+  assert.equal((await call(`pictures/${a.id}`)).status, 200);
+  assert.equal((await call("restore", jsonBody("POST", {}))).status, 400);
+  assert.equal((await call("restore", jsonBody("POST", { ids: [a.id] }))).status, 200);
+  assert.deepEqual((await info()).pictures.map((p) => p.id), [a.id, c.id]);
+  // deleting for good removes the files
+  assert.equal((await call("trash", jsonBody("DELETE", {}))).status, 400);
+  assert.deepEqual(await (await call("trash", jsonBody("DELETE", { all: true }))).json(), { ok: true, removed: 1 });
+  assert.equal((await call(`pictures/${b.id}`)).status, 404);
+  assert.deepEqual((await info()).trash, []);
+
+  // a day: validated, kept through an edit, cleared with null
+  for (const day of ["13-01", "02-30", "2026-2-1", "tomorrow", 5]) {
+    assert.equal((await call("pictures", jsonBody("PATCH", { ids: [c.id], day }))).status, 400, String(day));
+  }
+  assert.equal((await call("pictures", jsonBody("PATCH", { ids: [c.id], day: "02-29" }))).status, 200);
+  const res = await frameInfo(new Request(url(`/api/frames/dora/pictures/${c.id}`), {
+    method: "PUT", headers: { authorization: `Bearer ${f.auth}` }, body: await f.form(0x44),
+  }), f.ctx);
+  const { id: c2 } = await res.json();
+  assert.equal((await info()).pictures.find((p) => p.id === c2).day, "02-29");
+  assert.equal((await call("pictures", jsonBody("PATCH", { ids: [c2], day: null }))).status, 200);
+  assert.equal((await info()).pictures.find((p) => p.id === c2).day, undefined);
+});
+
 test("13.3-inch frames: bigger pictures, and never a picture made for the other screen", async () => {
   const bad = await adminReq("/api/admin/frames", { method: "POST", body: JSON.stringify({ id: "bad", panel: "42" }) });
   assert.equal(bad.status, 400);
@@ -476,4 +510,38 @@ test("sealing matches the firmware: HKDF-SHA256 token and AES-256-GCM layout", a
   const d = createDecipheriv("aes-256-gcm", okm("content"), sealed.subarray(0, 12));
   d.setAuthTag(sealed.subarray(sealed.length - 16));
   assert.deepEqual([...Buffer.concat([d.update(sealed.subarray(12, sealed.length - 16)), d.final()])], [0x01, 0x23, 0x45]);
+});
+
+test("the date a photo was taken comes from its EXIF data", async () => {
+  const { exifDate, dateTaken } = await import("../web/exif.js");
+  /** A JPEG start with an EXIF block: IFD0 (optionally DateTime) -> Exif IFD (optionally DateTimeOriginal). */
+  const jpeg = ({ le = false, original, plain } = {}) => {
+    const b = new DataView(new ArrayBuffer(256));
+    const u16 = (o, x) => b.setUint16(o, x, le), u32 = (o, x) => b.setUint32(o, x, le);
+    const str = (o, s) => [...s].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
+    b.setUint16(0, 0xffd8);
+    b.setUint16(2, 0xffe1);
+    b.setUint16(4, 200);
+    str(6, "Exif");
+    const t = 12; // TIFF header
+    str(t, le ? "II" : "MM");
+    u16(t + 2, 42);
+    u32(t + 4, 8);
+    const entry = (at, tag, type, count, value) => { u16(t + at, tag); u16(t + at + 2, type); u32(t + at + 4, count); u32(t + at + 8, value); };
+    u16(t + 8, plain ? 2 : 1); // IFD0 entries
+    entry(10, 0x8769, 4, 1, 60); // Exif IFD at 60
+    if (plain) { entry(22, 0x0132, 2, 20, 120); str(t + 120, plain); }
+    u16(t + 60, original ? 1 : 0);
+    if (original) { entry(62, 0x9003, 2, 20, 90); str(t + 90, original); }
+    return b;
+  };
+  assert.equal(exifDate(jpeg({ original: "2024:03:12 18:30:00" })), "2024-03-12");
+  assert.equal(exifDate(jpeg({ le: true, original: "2019:12:31 23:59:59" })), "2019-12-31", "little-endian (most phones)");
+  assert.equal(exifDate(jpeg({ plain: "2020:07:04 10:00:00" })), "2020-07-04", "falls back to DateTime");
+  assert.equal(exifDate(jpeg({ original: "2024:03:12 18:30:00", plain: "2025:01:01 00:00:00" })), "2024-03-12", "taken wins over modified");
+  assert.equal(exifDate(jpeg({ original: "0000:00:00 00:00:00" })), null, "blank dates");
+  assert.equal(exifDate(jpeg()), null);
+  assert.equal(exifDate(new DataView(new Uint8Array([137, 80, 78, 71]).buffer)), null, "not a JPEG");
+  assert.equal(await dateTaken(new Blob([jpeg({ original: "2024:03:12 18:30:00" }).buffer])), "2024-03-12");
+  assert.equal(await dateTaken(new Blob([])), null);
 });

@@ -11,6 +11,7 @@ function build() {
     <form method="dialog">
       <h2 class="ask-title"></h2>
       <p class="ask-message"></p>
+      <div class="ask-body"></div>
       <input class="text ask-input" autocomplete="off">
       <div class="ask-buttons">
         <button type="button" class="chip ask-cancel"></button>
@@ -23,8 +24,11 @@ function build() {
 /**
  * Ask something. Resolves to the typed text (with `input`), true (confirmed) or null (cancelled).
  * @param {{ title: string, message?: string, ok?: string, cancel?: string|null, danger?: boolean,
- *           input?: { value?: string, placeholder?: string }, mustType?: string }} o
+ *           input?: { value?: string, placeholder?: string }, mustType?: string,
+ *           body?: Element, valid?: () => boolean }} o
  *   mustType: the OK button stays disabled until exactly this is typed (for deleting things)
+ *   body: extra content under the message (e.g. a QR code or a date picker); valid: whether OK
+ *   is allowed, checked as anything in the body changes
  */
 export function ask(o) {
   if (!dlg) build();
@@ -33,6 +37,9 @@ export function ask(o) {
   $(".ask-title").textContent = o.title;
   $(".ask-message").textContent = o.message || "";
   $(".ask-message").hidden = !o.message;
+  const body = $(".ask-body");
+  body.replaceChildren(...(o.body ? [o.body] : []));
+  body.hidden = !o.body;
   const wantsText = !!(o.input || o.mustType);
   input.hidden = !wantsText;
   input.value = o.input?.value || "";
@@ -42,7 +49,7 @@ export function ask(o) {
   cancel.textContent = o.cancel || "Cancel";
   cancel.hidden = o.cancel === null;
   const check = () => {
-    ok.disabled = o.mustType ? input.value.trim() !== o.mustType : o.input ? !input.value.trim() : false;
+    ok.disabled = o.mustType ? input.value.trim() !== o.mustType : o.input ? !input.value.trim() : o.valid ? !o.valid() : false;
   };
   check();
 
@@ -50,11 +57,15 @@ export function ask(o) {
     let answer = null;
     const done = () => {
       input.removeEventListener("input", check);
+      body.removeEventListener("input", check);
+      body.removeEventListener("change", check);
       cancel.onclick = null;
       dlg.onclose = null;
       resolve(answer);
     };
     input.addEventListener("input", check);
+    body.addEventListener("input", check);
+    body.addEventListener("change", check);
     cancel.onclick = () => dlg.close();
     dlg.onclose = done; // Escape closes too: counts as cancel
     $("form").onsubmit = (e) => {
@@ -62,7 +73,7 @@ export function ask(o) {
       answer = wantsText ? input.value.trim() : true;
     };
     dlg.showModal();
-    (wantsText ? input : ok).focus();
+    (wantsText ? input : o.body?.querySelector("input, button") || ok).focus();
     if (wantsText) input.select();
   });
 }

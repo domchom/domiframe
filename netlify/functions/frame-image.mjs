@@ -122,7 +122,7 @@ async function upload(req, id, frame) {
   let removed = [];
   const saved = await updateState(id, (before) => {
     if (album && !before.albums.some((a) => a.id === album)) pic.album = null; // folder deleted meanwhile
-    const out = addPicture(before, pic);
+    const out = addPicture(before, pic, now());
     removed = out.removed;
     // Marking it seen keeps it from jumping the queue; it comes round with the rotation.
     if (form.get("queue") === "rotation") out.state.seen.push(pic.id);

@@ -1,8 +1,9 @@
 import { sizeFor, toPanelOrder, panelOf, DEFAULTS, ditherToPalette, pack, indicesToRGBA } from "./dither.js";
 import { ask, tell } from "./dialog.js";
 import { ago, until, batteryPct, LOW_BATTERY_PCT, rotateLabel, checkLabel, hourLabel } from "./format.js";
-import { rememberFrame, rememberedFrames, isFrameCode, normalizeCode } from "./code.js";
+import { rememberFrame, rememberedFrames, isFrameCode, normalizeCode, frameLink } from "./code.js";
 import { frameKeys, seal, unseal, sealText, unsealText } from "./seal.js";
+import { dateTaken } from "./exif.js";
 
 const $ = (id) => document.getElementById(id);
 const frameId = (location.pathname.match(/^\/f\/([a-z0-9-]+)/) || [])[1];
@@ -72,6 +73,7 @@ async function loadInfo() {
   showSwitcher(info.name);
   // Friends with the frame code can open this frame anywhere from the home page
   $("device-access").hidden = false;
+  $("invite").hidden = false;
   $("access-id").textContent = frameId;
   $("access-code").textContent = uploadKey;
   $("frame-name").textContent = info.name || "Your frame";
@@ -96,6 +98,54 @@ async function loadInfo() {
   if (hangChanged && source) scheduleRender(); // pictures are made for the new orientation
   if (photos.length > 1) showBatchNote();
 }
+
+// ---- Inviting someone: the frame's link as a QR code ------------------------------
+
+$("invite").addEventListener("click", async () => {
+  const link = location.origin + frameLink(frameId, uploadKey);
+  const box = document.createElement("div");
+  box.className = "invite-box";
+  if (window.qrcode) {
+    const qr = window.qrcode(0, "M");
+    qr.addData(link);
+    qr.make();
+    // Black on white with a 4-module margin, the way scanners like it
+    const n = qr.getModuleCount(), m = 6, side = (n + 8) * m;
+    const c = Object.assign(document.createElement("canvas"), { width: side, height: side, className: "qr" });
+    c.setAttribute("role", "img");
+    c.setAttribute("aria-label", "QR code with this frame's link");
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, side, side);
+    ctx.fillStyle = "#000";
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) if (qr.isDark(y, x)) ctx.fillRect((x + 4) * m, (y + 4) * m, m, m);
+    box.append(c);
+  }
+  const buttons = document.createElement("div");
+  buttons.className = "chips";
+  const copy = Object.assign(document.createElement("button"), { type: "button", className: "chip", textContent: "Copy link" });
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      copy.textContent = "Copied";
+    } catch {
+      copy.textContent = "Couldn't copy";
+    }
+  });
+  buttons.append(copy);
+  if (navigator.share) {
+    const share = Object.assign(document.createElement("button"), { type: "button", className: "chip", textContent: "Share…" });
+    share.addEventListener("click", () => navigator.share({ title: frameInfo?.name || "DomiFrame", text: "Send pictures to our frame:", url: link }).catch(() => {}));
+    buttons.append(share);
+  }
+  box.append(buttons);
+  await ask({
+    title: `Invite someone to ${frameInfo?.name || "this frame"}`,
+    message: "They scan this with their phone's camera, or open the link, and can send pictures right away. " +
+      "It also lets them remove pictures, so share it like a house key.",
+    body: box, ok: "Done", cancel: null,
+  });
+});
 
 // ---- Switching frames: for someone with more than one frame on this device -----------
 
@@ -129,6 +179,7 @@ $("switch-frame").addEventListener("change", async (e) => {
 
 /** Open the sealed parts of the frame's info: sender names, folder names, edit settings. */
 async function openInfo(info) {
+  info.trash ??= []; // a server from before the trash
   const opened = new Map(); // the same names repeat a lot
   const text = (s) => {
     if (!s) return null;
@@ -137,7 +188,7 @@ async function openInfo(info) {
   };
   await Promise.all([
     ...info.albums.map(async (a) => (a.name = (await text(a.name)) ?? "(unreadable)")),
-    ...info.pictures.map(async (p) => {
+    ...[...info.pictures, ...info.trash].map(async (p) => {
       p.from = await text(p.from);
       const edits = await text(p.edits);
       try { p.edits = edits ? JSON.parse(edits) : null; } catch { p.edits = null; }
@@ -212,7 +263,7 @@ $("hang-rebuild").addEventListener("click", () => {
 
 // ---- Library: folders, selection, bulk actions --------------------------------
 
-const lib = { view: "all", selected: new Set() }; // view: "all" | "unfiled" | folder id
+const lib = { view: "all", selected: new Set() }; // view: "all" | "unfiled" | "trash" | folder id
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const folderName = (id) => frameInfo?.albums.find((a) => a.id === id)?.name;
 const jsonReq = (method, body) => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -221,6 +272,21 @@ function inView(p) {
   if (lib.view === "all") return true;
   if (lib.view === "unfiled") return !p.album;
   return p.album === lib.view;
+}
+/** The pictures in the current view: from the frame, or from the trash. */
+const viewPics = () => (lib.view === "trash" ? frameInfo.trash : frameInfo.pictures.filter(inView));
+
+const TRASH_DAYS = 30; // as in netlify/lib/schedule.mjs
+const leftDays = (removedAt) => Math.max(1, Math.ceil(TRASH_DAYS - (Date.now() - Date.parse(removedAt)) / 864e5));
+
+/** "12 Mar every year" or "12 Mar 2026", for a picture's day ("MM-DD" or "YYYY-MM-DD"). */
+function dayLabel(day) {
+  const yearly = day.length === 5;
+  const [y, m, d] = (yearly ? `2024-${day}` : day).split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  return yearly
+    ? `${date.toLocaleDateString(undefined, { day: "numeric", month: "short" })} every year`
+    : date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
 async function showQueue(info) {
@@ -238,10 +304,12 @@ async function showQueue(info) {
   }
 
   // Forget selections and views that no longer exist
-  for (const id of lib.selected) if (!pics.some((p) => p.id === id)) lib.selected.delete(id);
-  if (!["all", "unfiled"].includes(lib.view) && !folderName(lib.view)) lib.view = "all";
+  const listed = lib.view === "trash" ? info.trash : pics;
+  for (const id of lib.selected) if (!listed.some((p) => p.id === id)) lib.selected.delete(id);
+  if (!["all", "unfiled", "trash"].includes(lib.view) && !folderName(lib.view)) lib.view = "all";
+  if (lib.view === "trash" && !info.trash.length) lib.view = "all";
 
-  $("library").hidden = !pics.length && !info.albums.length;
+  $("library").hidden = !pics.length && !info.albums.length && !info.trash.length;
   const cycling = info.settings.album && folderName(info.settings.album);
   $("queue-title").textContent =
     `${plural(pics.length, "picture")} · the frame shows ${cycling ? `“${cycling}”` : "all of them"}, changing ${rotateLabel(info.settings.rotateHours)}`;
@@ -264,6 +332,7 @@ async function showQueue(info) {
   const unfiled = pics.filter((p) => !p.album).length;
   const tabs = [["all", `All (${pics.length})`], ...info.albums.map((a) => [a.id, `${a.name} (${a.count})`])];
   if (info.albums.length && unfiled) tabs.push(["unfiled", `Not in a folder (${unfiled})`]);
+  if (info.trash.length) tabs.push(["trash", `Recently removed (${info.trash.length})`]);
   $("folders").replaceChildren(
     ...tabs.map(([id, label]) => {
       const b = document.createElement("button");
@@ -277,10 +346,11 @@ async function showQueue(info) {
     }),
     Object.assign(document.createElement("button"), { type: "button", className: "chip", textContent: "+ New folder", onclick: newFolder }),
   );
-  $("folder-actions").hidden = ["all", "unfiled"].includes(lib.view);
+  $("folder-actions").hidden = ["all", "unfiled", "trash"].includes(lib.view);
+  $("library").classList.toggle("in-trash", lib.view === "trash");
 
-  // Pictures in this view, newest first
-  const shown = pics.filter(inView).reverse();
+  // Pictures in this view, newest first (the trash: most recently removed first)
+  const shown = viewPics().slice().reverse();
   $("queue-empty").hidden = shown.length > 0;
   const list = $("queue");
   list.replaceChildren();
@@ -304,12 +374,19 @@ async function showQueue(info) {
     });
     const cap = document.createElement("span");
     cap.className = "small muted";
-    const inPool = !info.settings.album || p.album === info.settings.album;
+    if (lib.view === "trash") {
+      const left = leftDays(p.removedAt);
+      cap.textContent = [`Removed ${ago(p.removedAt)}`, `deleted for good in ${plural(left, "day")}`, p.from && `from ${p.from}`].filter(Boolean).join(" · ");
+      li.append(pick, cap);
+      list.append(li);
+      continue;
+    }
+    const inPool = (!info.settings.album || p.album === info.settings.album) && !p.day;
     const badge = p.id === info.current ? "On the frame"
       : p.id === info.showNext ? "Showing next"
       : !p.seen && inPool ? "Up next" : "";
     cap.textContent = [
-      badge, p.from && `from ${p.from}`, lib.view === "all" && p.album && folderName(p.album), ago(p.uploadedAt),
+      badge, p.day && `Shows ${dayLabel(p.day)}`, p.from && `from ${p.from}`, lib.view === "all" && p.album && folderName(p.album), ago(p.uploadedAt),
     ].filter(Boolean).join(" · ");
     if (badge) li.classList.add("badged");
     li.append(pick, cap);
@@ -320,31 +397,40 @@ async function showQueue(info) {
 
 function showBulkbar() {
   const n = lib.selected.size;
-  const pics = frameInfo.pictures;
-  const viewCount = pics.filter(inView).length;
-  $("sel-count").textContent = n ? `${n} selected` : viewCount ? "Tap pictures to select them." : "";
+  const trash = lib.view === "trash";
+  const viewCount = viewPics().length;
+  const chosen = frameInfo.pictures.filter((p) => lib.selected.has(p.id));
+  $("sel-count").textContent = n ? `${n} selected`
+    : trash ? `Removed pictures are deleted for good after ${TRASH_DAYS} days.`
+    : viewCount ? "Tap pictures to select them." : "";
   $("sel-all").hidden = !viewCount || n === viewCount;
   $("sel-none").hidden = !n;
-  $("sel-show").hidden = n !== 1;
-  $("sel-edit").hidden = !n;
-  $("sel-remove").hidden = !n;
+  $("sel-show").hidden = trash || n !== 1;
+  $("sel-edit").hidden = trash || !n;
+  $("sel-day").hidden = trash || !n;
+  $("sel-anyday").hidden = trash || !chosen.some((p) => p.day);
+  $("sel-remove").hidden = trash || !n;
+  $("sel-restore").hidden = !trash || !n;
+  $("sel-purge").hidden = !trash || !n;
   $("remove-all").hidden = !!n || !viewCount;
-  $("remove-all").textContent = lib.view === "all" ? "Remove all"
+  $("remove-all").textContent = trash ? "Delete all for good" : lib.view === "all" ? "Remove all"
     : lib.view === "unfiled" ? "Remove all not in a folder" : `Remove all in “${folderName(lib.view)}”`;
   const move = $("sel-move");
-  move.hidden = !n || (!frameInfo.albums.length);
+  move.hidden = trash || !n || (!frameInfo.albums.length);
   move.replaceChildren(new Option("Move to folder…", ""),
     ...frameInfo.albums.map((a) => new Option(a.name, a.id)), new Option("No folder", "none"), new Option("New folder…", "new"));
 }
 
 async function act(res, okMsg) {
+  hideUndo();
   const r = await res;
   if (!r.ok) {
     await tell("That didn't work", (await r.json().catch(() => ({}))).error || r.statusText);
     return false;
   }
-  if (okMsg) msg(okMsg, "ok");
   await loadInfo();
+  // Next to the pictures when they're showing; otherwise at the bottom of the page
+  if (okMsg) $("library").hidden ? msg(okMsg, "ok") : showUndo(okMsg);
   return true;
 }
 
@@ -385,7 +471,7 @@ $("cycle-shuffle").addEventListener("change", () =>
   act(api("settings", jsonReq("PUT", { order: $("cycle-shuffle").checked ? "shuffle" : "inorder" }))));
 
 $("sel-all").addEventListener("click", () => {
-  for (const p of frameInfo.pictures.filter(inView)) lib.selected.add(p.id);
+  for (const p of viewPics()) lib.selected.add(p.id);
   showQueue(frameInfo);
 });
 $("sel-none").addEventListener("click", () => { lib.selected.clear(); showQueue(frameInfo); });
@@ -394,21 +480,97 @@ $("sel-show").addEventListener("click", () => {
   lib.selected.clear();
   act(api(`pictures/${id}/show`, { method: "POST" }), "The frame will show it at its next check-in. Press its button to update now.");
 });
-$("sel-remove").addEventListener("click", async () => {
-  const ids = [...lib.selected];
-  const ok = await ask({ title: `Remove ${plural(ids.length, "picture")}?`, message: "They'll be deleted from the frame. This can't be undone.", ok: "Remove", danger: true });
-  if (!ok) return;
+// Removing moves pictures to "Recently removed" for TRASH_DAYS, with an Undo right away.
+async function removeWithUndo(body) {
   lib.selected.clear();
-  act(api("pictures", jsonReq("DELETE", { ids })));
-});
+  const r = await api("pictures", jsonReq("DELETE", body));
+  if (!(await act(Promise.resolve(r)))) return;
+  const { ids = [] } = await r.json().catch(() => ({}));
+  if (ids.length) showUndo(`Removed ${plural(ids.length, "picture")}.`, ids);
+}
+
+/** A note under the toolbar, with an Undo button when there's something to put back. */
+let undoTimer = 0;
+function showUndo(text, ids = null) {
+  $("undo-text").textContent = text;
+  $("undo").hidden = false;
+  $("undo-btn").hidden = !ids;
+  $("undo-btn").onclick = () => restore(ids);
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(hideUndo, ids ? 20e3 : 6e3);
+}
+async function restore(ids) {
+  if (await act(api("restore", jsonReq("POST", { ids })))) showUndo(`Put back ${plural(ids.length, "picture")}.`);
+}
+function hideUndo() {
+  clearTimeout(undoTimer);
+  $("undo").hidden = true;
+}
+
+$("sel-remove").addEventListener("click", () => removeWithUndo({ ids: [...lib.selected] }));
 $("remove-all").addEventListener("click", async () => {
-  const n = frameInfo.pictures.filter(inView).length;
+  const n = viewPics().length;
+  if (lib.view === "trash") {
+    const ok = await ask({ title: `Delete ${n === 1 ? "this picture" : `all ${n} pictures`} for good?`, message: "This can't be undone.", ok: "Delete for good", danger: true });
+    if (ok) act(api("trash", jsonReq("DELETE", { all: true })));
+    return;
+  }
   const where = lib.view === "all" ? "" : lib.view === "unfiled" ? " that aren't in a folder" : ` in “${folderName(lib.view)}”`;
   const what = n === 1 ? `the picture${where}` : `all ${n} pictures${where}`;
-  const ok = await ask({ title: `Remove ${what}?`, message: "They'll be deleted from the frame. This can't be undone.", ok: "Remove all", danger: true });
+  const ok = await ask({ title: `Remove ${what}?`, message: `They'll be in Recently removed for ${TRASH_DAYS} days, in case you change your mind.`, ok: "Remove all", danger: true });
   if (!ok) return;
-  const body = lib.view === "all" ? { all: true } : { album: lib.view === "unfiled" ? null : lib.view };
-  act(api("pictures", jsonReq("DELETE", body)));
+  removeWithUndo(lib.view === "all" ? { all: true } : { album: lib.view === "unfiled" ? null : lib.view });
+});
+$("sel-restore").addEventListener("click", () => {
+  const ids = [...lib.selected];
+  lib.selected.clear();
+  restore(ids);
+});
+$("sel-purge").addEventListener("click", async () => {
+  const ids = [...lib.selected];
+  const ok = await ask({ title: `Delete ${plural(ids.length, "picture")} for good?`, message: "This can't be undone.", ok: "Delete for good", danger: true });
+  if (!ok) return;
+  lib.selected.clear();
+  act(api("trash", jsonReq("DELETE", { ids })));
+});
+
+// ---- Pictures for a day: a birthday, an anniversary ---------------------------------
+
+$("sel-day").addEventListener("click", async () => {
+  const ids = [...lib.selected];
+  const had = frameInfo.pictures.find((p) => lib.selected.has(p.id) && p.day)?.day;
+  const box = document.createElement("div");
+  box.className = "day-pick";
+  const today = new Date();
+  const ymd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  box.innerHTML = `
+    <label class="slider">Day <input type="date" class="text" required></label>
+    <div class="seg" role="radiogroup" aria-label="How often">
+      <label><input type="radio" name="day-repeat" value="yearly" checked><span>Every year</span></label>
+      <label><input type="radio" name="day-repeat" value="once"><span>Just this once</span></label>
+    </div>`;
+  const date = box.querySelector("input[type=date]");
+  date.value = !had ? ymd : had.length === 10 ? had : `${today.getFullYear()}-${had}`;
+  if (had?.length === 10) box.querySelector("input[value=once]").checked = true;
+  const ok = await ask({
+    title: ids.length === 1 ? "Show this picture on a day" : `Show ${ids.length} pictures on a day`,
+    message: "On that day the frame shows it from its first check-in" + (ids.length > 1 ? ", taking turns if there are several" : "") +
+      ". The rest of the time it stays out of the rotation.",
+    body: box, ok: "Save", valid: () => !!date.value,
+  });
+  if (!ok) return;
+  const yearly = box.querySelector("input[value=yearly]").checked;
+  const day = yearly ? date.value.slice(5) : date.value;
+  lib.selected.clear();
+  // A day starts at midnight where the frame is: give it this browser's time zone if it has none yet
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (frameInfo.settings.tz === "UTC" && tz && tz !== "UTC") await api("settings", jsonReq("PUT", { tz }));
+  act(api("pictures", jsonReq("PATCH", { ids, day })), `Saved. ${ids.length === 1 ? "It shows" : "They show"} on ${dayLabel(day)}.`);
+});
+$("sel-anyday").addEventListener("click", () => {
+  const ids = [...lib.selected];
+  lib.selected.clear();
+  act(api("pictures", jsonReq("PATCH", { ids, day: null })), `Back in the rotation.`);
 });
 $("sel-move").addEventListener("change", async () => {
   let album = $("sel-move").value;
@@ -625,7 +787,7 @@ function render(quick = false) {
     pv.width = w;
     pv.height = h;
   }
-  const label = labelFor(photos[cur]);
+  const label = labelParts(photos[cur]);
   const cKey = [sourceId, w, h, o.fit, o.bg, o.zoom, Math.round(pan.x), Math.round(pan.y)].join("|");
   if (composed.key !== cKey) composed = { key: cKey, img: compose(o, w, h) };
   const img = composed.img;
@@ -637,7 +799,7 @@ function render(quick = false) {
   return new Promise((resolve) => submitDither({
     id: ++jobId, rgba: new Uint8ClampedArray(img.data), w, h, o, resolve,
     apply(idx) {
-      if (label) stampLabel(idx, w, h, label);
+      if (label.title || label.meta) stampLabel(idx, w, h, label);
       dithered = new ImageData(indicesToRGBA(idx), w, h);
       if (pv.width === w && pv.height === h && !comparing) pv.getContext("2d").putImageData(dithered, 0, 0);
       packed = pack(toPanelOrder(idx, w, h, panel));
@@ -645,37 +807,116 @@ function render(quick = false) {
   }));
 }
 
-/** New photos get "from <name>" if asked; edited ones keep the label they had. */
-function labelFor(p) {
-  if (p && p.label !== undefined) return p.label;
-  const name = $("from").value.trim();
+/** "from <name>" as set under Text, or null. */
+const currentSign = () => {
+  const name = $("sign-name").value.trim().slice(0, 40);
   return $("show-name").checked && name ? `from ${name}` : null;
+};
+/** New photos follow the Sign it controls; pictures being edited keep their own until changed. */
+const signFor = (p) => (p && p.sign !== undefined ? p.sign : currentSign());
+
+/** "12 Mar 2024" for a "YYYY-MM-DD" date. */
+const dateText = (ymd) => {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+};
+
+/** The text stamped on a picture: the caption, then a smaller line with the date taken and sender. */
+function labelParts(p) {
+  if (!p) return {};
+  const date = p.showDate && p.date ? dateText(p.date) : null;
+  return { title: p.caption?.trim() || null, meta: [date, signFor(p)].filter(Boolean).join(" · ") || null, corner: p.corner || "br" };
+}
+/** The same as one line of text, kept with the picture's edits. */
+const labelFor = (p) => { const { title, meta } = labelParts(p); return [title, meta].filter(Boolean).join(" · ") || null; };
+
+/** Up to two lines of `text` within `max` px, breaking between words (the second is squeezed if need be). */
+function wrapWords(ctx, text, max) {
+  const words = text.split(" ");
+  let i = 1;
+  while (i < words.length && ctx.measureText(words.slice(0, i + 1).join(" ")).width <= max) i++;
+  return i < words.length ? [words.slice(0, i).join(" "), words.slice(i).join(" ")] : [text];
 }
 
-/** Draw a white label with black text in the bottom-right corner, straight onto the inks. */
-function stampLabel(idx, w, h, text) {
+// The label's type: the site's condensed face for the caption, its mono for the small line.
+// Loaded up front so the first picture already uses them (the system fonts stand in until then).
+const LABEL_TITLE = (px) => `600 ${px}px "IBM Plex Sans Condensed", "Arial Narrow", ui-sans-serif, sans-serif`;
+const LABEL_META = (px) => `500 ${px}px "IBM Plex Mono", ui-monospace, Menlo, monospace`;
+Promise.all([document.fonts.load(LABEL_TITLE(20)), document.fonts.load(LABEL_META(12))])
+  .then(() => source && scheduleRender()).catch(() => {});
+
+/**
+ * A gallery-style label in the bottom-right corner, drawn straight onto the inks: a white card
+ * with a thin black border and a dithered shadow (like the site's cards), the caption, a short red
+ * rule, and the date and sender in small spaced capitals. Whole ink dots only, no grey.
+ */
+function stampLabel(idx, w, h, { title, meta, corner = "br" }) {
+  const BLACK = 0, WHITE = 1, RED = 3; // PALETTE order in dither.js
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
   const ctx = c.getContext("2d", { willReadFrequently: true });
   const k = Math.min(w, h) / 480; // same size on a 13.3" screen
-  ctx.font = `600 ${Math.round(22 * k)}px ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif`;
-  const pad = Math.round(10 * k), margin = Math.round(14 * k), bh = Math.round(36 * k);
-  const bw = Math.round(Math.min(w - 2 * margin, ctx.measureText(text).width + 2 * pad));
-  const x = w - margin - bw, y = h - margin - bh;
+  const r = (v) => Math.max(1, Math.round(v * k));
+  const padX = r(14), padY = r(11), margin = r(18), border = r(1.5), sh = r(5);
+  const titleLine = r(25), metaLine = r(16), ruleGap = r(7);
+  const maxText = Math.min(w - 2 * margin - sh, Math.round(w * 0.55)) - 2 * padX;
+
+  ctx.font = LABEL_TITLE(r(21));
+  const lines = title ? wrapWords(ctx, title, maxText) : [];
+  const titleW = Math.max(0, ...lines.map((l) => ctx.measureText(l).width));
+  const metaText = meta ? meta.toUpperCase() : "";
+  const metaPx = r(lines.length ? 11.5 : 13); // a little bigger on its own
+  ctx.font = LABEL_META(metaPx);
+  ctx.letterSpacing = `${(1.4 * k).toFixed(1)}px`;
+  const metaW = metaText ? ctx.measureText(metaText).width : 0;
+  ctx.letterSpacing = "0px";
+
+  const both = lines.length && metaText;
+  const innerH = lines.length * titleLine + (both ? ruleGap * 2 + border : 0) + (metaText ? metaLine : 0);
+  const bw = Math.round(Math.min(maxText, Math.max(titleW, metaW)) + 2 * padX);
+  const bh = innerH + 2 * padY;
+  // In the chosen corner, the shadow included
+  const x = corner[1] === "l" ? margin : w - margin - sh - bw;
+  const y = corner[0] === "t" ? margin : h - margin - sh - bh;
+
+  // The card: black border, white inside, black text
+  ctx.fillStyle = "#000";
+  ctx.fillRect(x, y, bw, bh);
   ctx.fillStyle = "#fff";
-  ctx.beginPath();
-  ctx.roundRect(x, y, bw, bh, 8);
-  ctx.fill();
+  ctx.fillRect(x + border, y + border, bw - 2 * border, bh - 2 * border);
   ctx.fillStyle = "#000";
   ctx.textBaseline = "middle";
-  ctx.fillText(text, x + pad, y + bh / 2 + 1, bw - 2 * pad);
+  let ty = y + padY;
+  ctx.font = LABEL_TITLE(r(21));
+  for (const l of lines) {
+    ctx.fillText(l, x + padX, ty + titleLine / 2, bw - 2 * padX);
+    ty += titleLine;
+  }
+  const ruleY = ty + ruleGap;
+  if (both) ty += ruleGap * 2 + border;
+  if (metaText) {
+    ctx.font = LABEL_META(metaPx);
+    ctx.letterSpacing = `${(1.4 * k).toFixed(1)}px`;
+    ctx.fillText(metaText, x + padX, ty + metaLine / 2, bw - 2 * padX);
+  }
+
+  // Onto the inks: anything drawn becomes black or white, no half-dots
   const px = ctx.getImageData(x, y, bw, bh).data;
   for (let j = 0; j < bh; j++) {
     for (let i = 0; i < bw; i++) {
-      const k = (j * bw + i) * 4;
-      if (px[k + 3] < 128) continue; // outside the rounded corners
-      idx[(y + j) * w + x + i] = px[k] < 128 ? 0 : 1; // black or white ink
+      const o = (j * bw + i) * 4;
+      if (px[o + 3] >= 128) idx[(y + j) * w + x + i] = px[o] < 128 ? BLACK : WHITE;
+    }
+  }
+  // A short red rule between the caption and the small line
+  if (both) {
+    for (let j = 0; j < border + 1; j++) for (let i = 0; i < r(26); i++) idx[(ruleY + j) * w + x + padX + i] = RED;
+  }
+  // The shadow: a checkerboard of black dots down and to the right, like the site's cards
+  for (let j = y + sh; j < y + bh + sh; j++) {
+    for (let i = x + sh; i < x + bw + sh; i++) {
+      if ((i >= x + bw || j >= y + bh) && (i + j) % 2 === 0) idx[j * w + i] = BLACK;
     }
   }
 }
@@ -692,7 +933,7 @@ function scheduleRender() {
 // Framing (orientation, zoom, position, rotation) belongs to each photo. So does the look
 // (sliders, dithering, fit, border), but with scope "all" a change is copied to every photo,
 // setting by setting: brightening all photos doesn't undo one photo's black and white.
-let photos = []; // { file, thumb, turns, zoom, pan, look, replaces?, label? }
+let photos = []; // { file, thumb, turns, zoom, pan, look, caption, date, dateFrom, showDate, corner, replaces?, sign? }
 let cur = 0;
 let scope = "all"; // which photos a look change affects: "all" or "this"
 let busySending = false;
@@ -729,6 +970,7 @@ function syncPhoto() {
   const p = photos[cur];
   if (!p) return;
   p.zoom = parseFloat($("zoom").value);
+  p.caption = $("caption").value.slice(0, 60);
   const now = readLook();
   const changed = Object.keys(now).filter((k) => now[k] !== p.look[k]);
   if (!changed.length) return;
@@ -768,7 +1010,15 @@ async function pickFiles(list) {
   }
   forgetPhotos();
   const look = readLook(); // start from whatever look is set now
-  photos = imgs.map((file) => ({ file, thumb: null, turns: 0, zoom: 1, pan: { x: 0, y: 0 }, look: { ...look } }));
+  let showDate = false, corner = "br";
+  try {
+    showDate = localStorage.getItem("domiframe:show-date") === "1";
+    corner = localStorage.getItem("domiframe:corner") || "br";
+  } catch {}
+  photos = imgs.map((file) => ({
+    file, thumb: null, turns: 0, zoom: 1, pan: { x: 0, y: 0 }, look: { ...look }, caption: "", date: null, dateFrom: null, showDate, corner,
+  }));
+  readDates(photos);
   skippedFiles = all.length - imgs.length;
   editing = false;
   updateBatch();
@@ -780,6 +1030,52 @@ async function pickFiles(list) {
     }
   }
   msg("Couldn't open those photos. Try JPEG or PNG.", "err");
+}
+
+/** Each photo's date taken, from its EXIF data, read in the background. */
+async function readDates(list) {
+  for (const p of list) {
+    const found = await dateTaken(p.file);
+    if (list !== photos) return; // a new set was picked
+    if (found && !p.date) Object.assign(p, { date: found, dateFrom: "photo" }); // unless one was typed meanwhile
+    if (p === photos[cur]) {
+      showDateNote();
+      if (p.showDate && p.date) scheduleRender();
+    }
+  }
+}
+
+function showDateNote() {
+  const p = photos[cur];
+  if (!p) return;
+  $("photo-date").value = p.date || "";
+  $("date-field").hidden = !p.showDate;
+  const n = photos.filter((q) => q.date).length;
+  $("date-note").hidden = !p.showDate;
+  $("date-note").textContent = p.date
+    ? p.dateFrom === "photo" ? "From the photo's details. Change it if it's wrong." : ""
+    : photos.length > 1 ? `No date found in this photo (${n} of ${photos.length} have one): pick one above, or it's left off.`
+    : "No date found in this photo: pick one above, or it's left off. Phone photos usually have one; screenshots often don't.";
+}
+
+$("show-date").addEventListener("change", () => {
+  for (const p of photos) p.showDate = $("show-date").checked; // the whole set
+  if (!editing) try { localStorage.setItem("domiframe:show-date", $("show-date").checked ? "1" : "0"); } catch {}
+  showDateNote();
+});
+// Each photo's date can be set by hand: a scan of an old print, or a wrong camera clock
+$("photo-date").addEventListener("input", () => {
+  const p = photos[cur];
+  if (!p) return;
+  Object.assign(p, { date: $("photo-date").value || null, dateFrom: "you" });
+  showDateNote();
+});
+// The corner applies to the whole set, and is remembered for next time
+for (const r of document.querySelectorAll("input[name=corner]")) {
+  r.addEventListener("change", () => {
+    for (const p of photos) p.corner = r.value;
+    if (!editing) try { localStorage.setItem("domiframe:corner", r.value); } catch {}
+  });
 }
 
 const MAX_SIDE = 2000; // plenty for 3× zoom on an 800 px panel, and what's kept as the original
@@ -866,6 +1162,11 @@ async function select(i) {
   $("zoom").value = p.zoom;
   pan = p.pan;
   writeLook(p.look);
+  $("caption").value = p.caption || "";
+  $("show-date").checked = !!p.showDate;
+  setRadio("corner", p.corner || "br");
+  showSign(p.sign);
+  showDateNote();
   markStrip();
   showLookStatus();
   showValues();
@@ -975,7 +1276,10 @@ async function editUploaded(ids) {
     loaded.push({
       file: new File([blob], `${p.id}.jpg`, { type: "image/jpeg" }), thumb: null,
       turns: 0, zoom: e.zoom || 1, pan: { x: e.pan?.x || 0, y: e.pan?.y || 0 },
-      look: cleanLook(e.look), replaces: p.id, label: e.label ?? null,
+      look: cleanLook(e.look), replaces: p.id,
+      // Before captions (v2) the label was only ever "from <name>"
+      sign: (e.v >= 3 ? e.sign : e.label) ?? null,
+      caption: e.caption || "", date: e.date || null, dateFrom: e.date ? "saved" : null, showDate: !!e.showDate, corner: e.corner || "br",
     });
   }
   if (!loaded.length) return msg("Couldn't open those pictures.", "err");
@@ -1198,19 +1502,48 @@ cmp.addEventListener("contextmenu", (e) => e.preventDefault());
 
 applyPreset(PRESETS.default);
 
-// Remember the sender's name for next time
-try {
-  $("from").value = localStorage.getItem("domiframe:from") || "";
-  $("show-name").checked = localStorage.getItem("domiframe:show-name") === "1";
-} catch {}
-$("from").addEventListener("change", () => { try { localStorage.setItem("domiframe:from", $("from").value.trim()); } catch {} });
-$("show-name").addEventListener("change", () => { try { localStorage.setItem("domiframe:show-name", $("show-name").checked ? "1" : "0"); } catch {} });
+// ---- Signing: a name on the picture itself ---------------------------------------
+// For new photos these are remembered for next time. When editing, they show the picture's own
+// signature, and changing them changes it for every picture being edited.
+
+const savedPref = (k, fallback = "") => { try { return localStorage.getItem(k) ?? fallback; } catch { return fallback; } };
+const savePref = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+
+/** Set the Sign it controls: from a picture's signature, or the remembered choice. */
+function showSign(sign) {
+  if (sign === undefined) {
+    $("show-name").checked = savedPref("domiframe:show-name") === "1";
+    $("sign-name").value = savedPref("domiframe:sign-name") || $("from").value.trim();
+  } else {
+    $("show-name").checked = !!sign;
+    $("sign-name").value = sign ? sign.replace(/^from /, "") : savedPref("domiframe:sign-name") || $("from").value.trim();
+  }
+  $("sign-field").hidden = !$("show-name").checked;
+}
+function signChanged() {
+  $("sign-field").hidden = !$("show-name").checked;
+  if (editing) {
+    for (const p of photos) p.sign = currentSign();
+  } else {
+    savePref("domiframe:show-name", $("show-name").checked ? "1" : "0");
+    savePref("domiframe:sign-name", $("sign-name").value.trim());
+  }
+}
+$("show-name").addEventListener("change", signChanged);
+$("sign-name").addEventListener("input", signChanged);
+
+$("from").value = savedPref("domiframe:from");
+$("from").addEventListener("change", () => {
+  savePref("domiframe:from", $("from").value.trim());
+  if (!$("sign-name").value.trim() && !editing) $("sign-name").value = $("from").value.trim(); // a likely signature
+});
+showSign();
 
 /** The settings a picture was made with, saved so it can be edited again. */
 function editsOf(p) {
   return {
-    v: 2, panel: framePanel(), orientation: framePortrait() ? "portrait" : "landscape", zoom: p.zoom, pan: { x: Math.round(p.pan.x), y: Math.round(p.pan.y) },
-    look: p.look, label: labelFor(p),
+    v: 3, panel: framePanel(), orientation: framePortrait() ? "portrait" : "landscape", zoom: p.zoom, pan: { x: Math.round(p.pan.x), y: Math.round(p.pan.y) },
+    look: p.look, label: labelFor(p), sign: signFor(p), caption: p.caption || "", date: p.date, showDate: !!p.showDate, corner: p.corner || "br",
   };
 }
 

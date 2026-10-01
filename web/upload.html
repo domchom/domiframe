@@ -41,6 +41,7 @@
         <p class="eyebrow">Now showing on</p>
         <h2 id="frame-name">Your frame</h2>
         <p class="meta" id="frame-status">Loading…</p>
+        <button type="button" class="chip invite" id="invite" hidden>Invite someone</button>
       </div>
       <div class="now">
         <figure class="current">
@@ -82,10 +83,18 @@
           <button type="button" class="chip" id="sel-none" hidden>Clear selection</button>
           <button type="button" class="chip" id="sel-show" hidden>Show next</button>
           <button type="button" class="chip" id="sel-edit" hidden>Edit</button>
+          <button type="button" class="chip" id="sel-day" hidden>Show on a day…</button>
+          <button type="button" class="chip" id="sel-anyday" hidden>Show any day</button>
           <select id="sel-move" class="chip" hidden aria-label="Move selected pictures to a folder"></select>
+          <button type="button" class="chip" id="sel-restore" hidden>Restore</button>
           <button type="button" class="chip danger" id="sel-remove" hidden>Remove</button>
+          <button type="button" class="chip danger" id="sel-purge" hidden>Delete for good</button>
           <button type="button" class="chip danger" id="remove-all">Remove all</button>
         </div>
+        <p class="undo-bar" id="undo" role="status" hidden>
+          <span id="undo-text"></span>
+          <button type="button" class="link" id="undo-btn">Undo</button>
+        </p>
         <p class="hang-mismatch" id="hang-mismatch" hidden>
           <span id="hang-mismatch-text"></span>
           <button type="button" class="link" id="hang-rebuild">Rebuild them</button>
@@ -169,6 +178,7 @@
             <button type="button" role="tab" data-tab="light">Light</button>
             <button type="button" role="tab" data-tab="color">Color</button>
             <button type="button" role="tab" data-tab="detail">Detail</button>
+            <button type="button" role="tab" data-tab="text">Text</button>
           </div>
 
           <div class="panel" data-panel="frame" role="tabpanel">
@@ -242,6 +252,29 @@
             </label>
             <p class="tip">The frame has six inks, so dithering mixes dots of them to fake every other color. Which style looks best depends on the photo.</p>
           </div>
+          <div class="panel" data-panel="text" role="tabpanel" hidden>
+            <label class="slider">Caption
+              <input type="text" id="caption" class="text" maxlength="60" autocomplete="off" placeholder="Optional, e.g. Beach day">
+            </label>
+            <p class="tip batch-only">Each photo has its own caption.</p>
+            <label class="check"><input type="checkbox" id="show-name"> Sign it</label>
+            <label class="slider" id="sign-field">Signed by
+              <input type="text" id="sign-name" class="text" maxlength="40" autocomplete="given-name" placeholder="Your name">
+            </label>
+            <label class="check"><input type="checkbox" id="show-date"> Add the date it was taken</label>
+            <label class="slider" id="date-field">Date
+              <input type="date" id="photo-date" class="text">
+            </label>
+            <p class="tip" id="date-note"></p>
+            <h3 class="label-where" id="corner-title">Label in the corner</h3>
+            <div class="seg corners" role="radiogroup" aria-labelledby="corner-title">
+              <label><input type="radio" name="corner" value="tl"><span>↖ Top left</span></label>
+              <label><input type="radio" name="corner" value="tr"><span>Top right ↗</span></label>
+              <label><input type="radio" name="corner" value="bl"><span>↙ Bottom left</span></label>
+              <label><input type="radio" name="corner" value="br" checked><span>Bottom right ↘</span></label>
+            </div>
+            <p class="tip">Signing, the date and the corner apply to every photo in the set.</p>
+          </div>
           <p class="tip">Double-click a slider to reset it.</p>
           </div>
 
@@ -253,7 +286,7 @@
               <label class="slider">Your name
                 <input type="text" id="from" maxlength="40" autocomplete="given-name" placeholder="Optional" class="text">
               </label>
-              <label class="check"><input type="checkbox" id="show-name"> Sign the picture with my name</label>
+              <p class="tip">Saved with the picture, so everyone with the frame sees who sent it. To put a name on the picture itself, use Sign it under Text.</p>
             </div>
             <button id="send" class="primary">Send to frame</button>
           </div>
@@ -306,6 +339,7 @@
 
     <p class="muted small foot" id="foot">The frame checks for new pictures about once an hour. Press its button to update now.</p>
   </main>
+  <script src="/vendor/qrcode.min.js"></script>
   <script type="module" src="/upload.js"></script>
 </body>
 </html>

@@ -108,7 +108,7 @@ async function putSettings(req, id, frame) {
 
 async function remove(id) {
   const state = await loadState(id);
-  await deletePictureFiles(id, state.pictures.map((p) => p.id));
+  await deletePictureFiles(id, [...state.pictures, ...state.trash].map((p) => p.id));
   await Promise.all([frames().delete(id), status().delete(id), states().delete(id)]);
   return json({ ok: true });
 }
