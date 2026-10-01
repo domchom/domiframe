@@ -1,7 +1,7 @@
 import { sizeFor, toPanelOrder, panelOf, DEFAULTS, ditherToPalette, pack, indicesToRGBA } from "./dither.js";
 import { ask, tell } from "./dialog.js";
 import { ago, until, batteryPct, LOW_BATTERY_PCT, rotateLabel, checkLabel, hourLabel } from "./format.js";
-import { rememberFrame, isFrameCode, normalizeCode } from "./code.js";
+import { rememberFrame, rememberedFrames, isFrameCode, normalizeCode } from "./code.js";
 import { frameKeys, seal, unseal, sealText, unsealText } from "./seal.js";
 
 const $ = (id) => document.getElementById(id);
@@ -69,6 +69,7 @@ async function loadInfo() {
   if (!res.ok) return cantOpen(res.status === 404);
   const info = await openInfo(await res.json());
   rememberFrame(frameId, info.name);
+  showSwitcher(info.name);
   // Friends with the frame code can open this frame anywhere from the home page
   $("device-access").hidden = false;
   $("access-id").textContent = frameId;
@@ -95,6 +96,36 @@ async function loadInfo() {
   if (hangChanged && source) scheduleRender(); // pictures are made for the new orientation
   if (photos.length > 1) showBatchNote();
 }
+
+// ---- Switching frames: for someone with more than one frame on this device -----------
+
+const OTHER_FRAME = "";
+function showSwitcher(name) {
+  const saved = rememberedFrames();
+  const others = saved.filter((f) => f.id !== frameId);
+  name ||= frameInfo?.name || saved.find((f) => f.id === frameId)?.name || frameId;
+  // This frame stays in the list even when its code just failed, so the menu still says where you are
+  const frames = [{ id: frameId, name }, ...others]
+    .sort((a, b) => a.name.localeCompare(b.name));
+  $("switch-frame").closest("label").hidden = !others.length;
+  $("switch-frame").replaceChildren(
+    ...frames.map((f) => new Option(f.name, f.id, false, f.id === frameId)),
+    new Option("Open another frame…", OTHER_FRAME),
+  );
+}
+$("switch-frame").addEventListener("change", async (e) => {
+  const id = e.target.value;
+  if (photos.length && !(await ask({
+    title: "Leave the photos you're editing?",
+    message: `${plural(photos.length, "photo")} in the editor haven't been sent and will be cleared.`,
+    ok: "Switch frame",
+  }))) {
+    e.target.value = frameId;
+    return;
+  }
+  // Each frame's code is already saved on this device, so the link doesn't need it
+  location.href = id === OTHER_FRAME ? "/#frame" : `/f/${id}`;
+});
 
 /** Open the sealed parts of the frame's info: sender names, folder names, edit settings. */
 async function openInfo(info) {
@@ -1314,6 +1345,7 @@ async function sendBatch() {
 }
 
 
+showSwitcher(); // right away, so it's there even if this frame can't be opened
 loadInfo();
 
 // Coming back to the page (e.g. after pressing the frame's button): show the latest check-in.

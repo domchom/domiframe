@@ -199,6 +199,8 @@ button.primary:disabled { opacity: .5; cursor: wait; }
 .chip.danger { color: var(--accent); border-color: var(--accent); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 a.chip { text-decoration: none; display: inline-block; }
+.frame-switch { margin-left: auto; max-width: 100%; }
+.frame-switch select { max-width: 100%; }
 select.chip { width: auto; display: inline-block; margin: 0; padding: 8px 10px; text-transform: none; letter-spacing: 0; font-family: var(--sans); font-size: 13px; }
 
 button.link {
