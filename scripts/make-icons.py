@@ -99,6 +99,7 @@ def font(path, size, fallback="/System/Library/Fonts/Helvetica.ttc"):
     try:
         return ImageFont.truetype(path, size)
     except Exception:
+        print(f"warning: can't open font {path!r}, using Helvetica for og.png", file=sys.stderr)
         return ImageFont.truetype(fallback, size)
 
 def og_image(display_font, mono_font):
