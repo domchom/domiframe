@@ -668,6 +668,18 @@ details > summary .meta { margin: 0; }
 }
 .print:has(> img[hidden]) { display: none; }
 
+/* Privacy, terms and help: plain reading pages */
+.prose .headline { margin-bottom: 18px; }
+.prose h3 { margin: 28px 0 8px; }
+.prose p, .prose li { font-size: 15px; line-height: 1.65; max-width: 68ch; }
+.prose p { margin: 0 0 12px; }
+.prose ul { margin: 0 0 12px; padding-left: 20px; }
+.prose li { margin: 0 0 8px; }
+.prose .lede { margin-bottom: 10px; }
+.prose a, .foot a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.prose a:hover, .foot a:hover { color: var(--accent); }
+.legal-links { margin-top: 4px; }
+
 
 /* How the frame hangs */
 .hang { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 18px; }

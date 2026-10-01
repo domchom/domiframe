@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy policy · DomiFrame</title>
+  <meta name="description" content="What DomiFrame stores, where, and for how long. Pictures are end-to-end encrypted: nobody who runs DomiFrame can see them.">
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <meta name="theme-color" content="#e8e8e8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111416" media="(prefers-color-scheme: dark)">
+  <link rel="canonical" href="https://domiframe.art/privacy.html">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/brand.js"></script>
+</head>
+<body>
+  <main class="wrap">
+    <header class="brand">
+      <a class="home-link" href="/" aria-label="DomiFrame home"><h1>DomiFrame</h1><span class="mark" aria-hidden="true"></span></a>
+    </header>
+    <section class="card prose">
+      <p class="eyebrow">Privacy</p>
+      <h2 class="headline">Privacy policy</h2>
+      <p class="lede">DomiFrame is built so that nobody who runs it can see your pictures. There are no accounts, no ads, no analytics and no tracking, and nothing is sold. This page says exactly what is stored, where, and for how long. It covers the website (domiframe.art), the DomiFrame iPhone and iPad app, and the frames.</p>
+      <p class="meta">Last updated 1 October 2026</p>
+
+      <h3>Your pictures are end-to-end encrypted</h3>
+      <p>Every frame makes its own frame code and shows it on its screen. The code never goes to the server. When you send a photo, your phone or browser locks everything with that code before it leaves the device: the picture for the frame, its previews and thumbnail, the original photo (kept so it can be edited again), the edit settings, any caption or signature, your name if you add one, and folder names. The server stores only the locked (encrypted) data. The frame unlocks a picture with its code just before drawing it.</p>
+      <p>That means DomiFrame can't see, sort, scan or hand over your pictures or names, because it doesn't have the key. It also means a lost code can't be recovered by us.</p>
+
+      <h3>What the server does store</h3>
+      <ul>
+        <li><b>About each frame:</b> its ID, the name it was given when it was set up, its screen size and how it hangs, and its settings (how often it changes picture and checks in, shuffle, quiet hours and their time zone, which folder it shows).</li>
+        <li><b>About each picture:</b> when it was sent, its place in the queue, which folder it's in, whether the frame has shown it, a day it should show on if one is set, and when it was removed. The picture and its names stay encrypted.</li>
+        <li><b>From the frame when it checks in:</b> the time, its battery voltage, its firmware version and screen size. Only the latest check-in is kept.</li>
+        <li><b>Keys:</b> a one-way fingerprint (SHA-256 hash) of the frame's access token and of its device key, so the server can check them without storing them.</li>
+      </ul>
+      <p>DomiFrame's own code doesn't record IP addresses, devices or browsing.</p>
+
+      <h3>Who else is involved</h3>
+      <ul>
+        <li><b>Netlify</b> hosts the website and the server, and stores the data above. Like any web host, it handles your IP address and basic request details to deliver pages and may keep them in logs for a short time. See <a href="https://www.netlify.com/privacy/">Netlify's privacy policy</a>.</li>
+        <li><b>Google Fonts</b>: the website loads its typefaces from Google, so your browser contacts Google when you open a page. See <a href="https://policies.google.com/privacy">Google's privacy policy</a>. The app doesn't use Google Fonts.</li>
+        <li><b>Art Institute of Chicago</b>: in the app, Add Art shows public-domain paintings straight from the museum's image server, so the app contacts artic.edu when you open it. Nothing about you or your frames is sent. See the <a href="https://www.artic.edu/terms/privacy-policy">museum's privacy policy</a>.</li>
+      </ul>
+      <p>No other service receives anything.</p>
+
+      <h3>What stays on your device</h3>
+      <ul>
+        <li><b>Website:</b> frame IDs and codes you've opened (so you don't have to type them again), the light or dark setting, your name for signing and a few editor choices, in your browser's storage. Clearing your site data removes them.</li>
+        <li><b>App:</b> frame codes in the iOS Keychain, on this device only; the list of frames you've opened, your name for signing and a few editor choices in the app's own storage. Forgetting a frame under Manage Frames, or deleting the app, removes them.</li>
+        <li><b>Photos and camera:</b> the app uses the system photo picker, so it only sees the photos you choose. The camera is used only to scan an invite QR code; nothing it sees is saved or sent.</li>
+      </ul>
+
+      <h3>Who can see and change a frame's pictures</h3>
+      <p>Anyone with the frame's code or invite link can send pictures to it, see its pictures and remove them. Share it the way you'd share a house key. To shut everyone out, make a new frame code in the frame's setup portal: the old code stops working, and the pictures and folders sealed with it are deleted.</p>
+
+      <h3>How long things are kept</h3>
+      <ul>
+        <li>Pictures stay until someone removes them. Removed pictures stay in Recently removed for 30 days, then they're deleted for good (or sooner, if someone deletes them from there).</li>
+        <li>Making a new frame code deletes all of that frame's pictures and folders.</li>
+        <li>If a frame is deleted, everything about it is deleted with it.</li>
+      </ul>
+
+      <h3>Children</h3>
+      <p>DomiFrame isn't aimed at children under 13 and doesn't knowingly collect anything from them. It doesn't collect personal details from anyone.</p>
+
+      <h3>Your choices</h3>
+      <p>You can remove any picture, empty Recently removed, or make a new frame code at any time, without asking anyone. To have a whole frame deleted, open an issue at <a href="https://github.com/domchom/domiframe/issues">github.com/domchom/domiframe/issues</a> with the frame's ID. Never post a frame code there: issues are public, and the ID is all that's needed.</p>
+
+      <h3>Changes</h3>
+      <p>If this policy changes, the new version will be posted here with a new date. A change that collects more will be explained here before it happens.</p>
+
+      <h3>Contact</h3>
+      <p>Questions about privacy: <a href="https://github.com/domchom/domiframe/issues">github.com/domchom/domiframe/issues</a>.</p>
+    </section>
+    <p class="muted small foot"><a href="/">Home</a> · <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a> · <a href="/support.html">Support</a></p>
+  </main>
+</body>
+</html>

@@ -3,7 +3,8 @@
 // exactly as sent, and only someone with the frame code can open them.
 //   GET    /api/frames/:id/info                     -> name, check-ins, battery, settings, folders, pictures
 //   GET    /api/frames/:id/preview                  -> PNG of the picture on the frame now
-//   PUT    /api/frames/:id/settings                 -> { rotateHours, checkMinutes, album, order, quiet, quietStart, quietEnd, tz }
+//   PUT    /api/frames/:id/settings                 -> { rotateHours, checkMinutes, album, order, quiet, quietStart, quietEnd, tz, name }
+//                                                      (name: the frame's own name, plain text, as the admin set it)
 //
 //   GET    /api/frames/:id/pictures/:pic            -> PNG preview
 //   GET    /api/frames/:id/pictures/:pic/thumb      -> small JPEG for the picture grid (PNG preview if none)
@@ -211,11 +212,18 @@ async function putSettings(req, id, frame) {
   } catch {
     return json({ error: "expected JSON body" }, 400);
   }
-  const { settings, error } = mergeSettings(frame.settings, body);
+  // The frame's name isn't a setting, but its owners can change it too
+  const { name: rawName, ...rest } = body || {};
+  let name = frame.name;
+  if (rawName !== undefined) {
+    name = String(rawName).trim().slice(0, 60);
+    if (!name) return json({ error: "name can't be empty" }, 400);
+  }
+  const { settings, error } = mergeSettings(frame.settings, rest);
   if (error) return json({ error }, 400);
   if (settings.album && !hasAlbum(await loadState(id), settings.album)) return json({ error: "no such folder" }, 400);
-  await frames().setJSON(id, { ...frame, settings });
-  return json({ ok: true, settings });
+  await frames().setJSON(id, { ...frame, name, settings });
+  return json({ ok: true, name, settings });
 }
 
 async function replace(req, id, oldId, frame) {

@@ -214,6 +214,12 @@ test("full flow: create frame, frame makes its code, queue pictures, rotate, set
   res = await f.call("settings", jsonBody("PUT", { rotateHours: 1 }));
   assert.equal(res.status, 200);
   assert.equal((await f.call("settings", jsonBody("PUT", { rotateHours: 5 }))).status, 400);
+  // owners can rename the frame; an empty name is refused and changes nothing
+  res = await f.call("settings", jsonBody("PUT", { name: "  Kitchen wall  " }));
+  assert.equal((await res.json()).name, "Kitchen wall");
+  assert.equal((await f.call("settings", jsonBody("PUT", { name: " " }))).status, 400);
+  assert.equal((await (await f.call("info")).json()).name, "Kitchen wall");
+  await f.call("settings", jsonBody("PUT", { name: "Emma's frame" }));
   res = await f.dev({ "if-none-match": etag2 });
   assert.equal(res.status, 304);
   assert.ok(Number(res.headers.get("x-sleep-minutes")) <= 60);
