@@ -61,47 +61,6 @@
           </div>
         </aside>
       </div>
-      <div id="library" hidden>
-        <div class="section-head">
-          <h2 class="section-title">Collection</h2>
-          <p class="meta" id="queue-title"></p>
-        </div>
-        <div class="cycle">
-          <label class="slider">The frame shows
-            <select id="cycle-album"></select>
-          </label>
-          <label class="check"><input type="checkbox" id="cycle-shuffle"> Shuffle</label>
-        </div>
-        <div class="chips folders" id="folders" role="tablist" aria-label="Folders"></div>
-        <div class="folder-actions" id="folder-actions" hidden>
-          <button type="button" class="link" id="rename-folder">Rename folder</button>
-          <button type="button" class="link" id="delete-folder">Delete folder</button>
-        </div>
-        <div class="bulkbar">
-          <span id="sel-count" class="small muted">Tap pictures to select them.</span>
-          <button type="button" class="chip" id="sel-all">Select all</button>
-          <button type="button" class="chip" id="sel-none" hidden>Clear selection</button>
-          <button type="button" class="chip" id="sel-show" hidden>Show next</button>
-          <button type="button" class="chip" id="sel-edit" hidden>Edit</button>
-          <button type="button" class="chip" id="sel-day" hidden>Show on a day…</button>
-          <button type="button" class="chip" id="sel-anyday" hidden>Show any day</button>
-          <select id="sel-move" class="chip" hidden aria-label="Move selected pictures to a folder"></select>
-          <button type="button" class="chip" id="sel-restore" hidden>Restore</button>
-          <button type="button" class="chip danger" id="sel-remove" hidden>Remove</button>
-          <button type="button" class="chip danger" id="sel-purge" hidden>Delete for good</button>
-          <button type="button" class="chip danger" id="remove-all">Remove all</button>
-        </div>
-        <p class="undo-bar" id="undo" role="status" hidden>
-          <span id="undo-text"></span>
-          <button type="button" class="link" id="undo-btn">Undo</button>
-        </p>
-        <p class="hang-mismatch" id="hang-mismatch" hidden>
-          <span id="hang-mismatch-text"></span>
-          <button type="button" class="link" id="hang-rebuild">Rebuild them</button>
-        </p>
-        <ul id="queue" class="queue"></ul>
-        <p class="muted small" id="queue-empty" hidden>Nothing in this folder yet. Add pictures below, or select some and move them here.</p>
-      </div>
     </section>
 
     <section class="card">
@@ -294,6 +253,48 @@
         </div>
       </div>
       <p id="msg" class="msg" role="status"></p>
+    </section>
+
+    <section class="card" id="library" hidden>
+      <div class="section-head">
+        <h2 class="section-title">Collection</h2>
+        <p class="meta" id="queue-title"></p>
+      </div>
+      <div class="cycle">
+        <label class="slider">The frame shows
+          <select id="cycle-album"></select>
+        </label>
+        <label class="check"><input type="checkbox" id="cycle-shuffle"> Shuffle</label>
+      </div>
+      <div class="chips folders" id="folders" role="tablist" aria-label="Folders"></div>
+      <div class="folder-actions" id="folder-actions" hidden>
+        <button type="button" class="link" id="rename-folder">Rename folder</button>
+        <button type="button" class="link" id="delete-folder">Delete folder</button>
+      </div>
+      <div class="bulkbar">
+        <span id="sel-count" class="small muted">Tap pictures to select them.</span>
+        <button type="button" class="chip" id="sel-all">Select all</button>
+        <button type="button" class="chip" id="sel-none" hidden>Clear selection</button>
+        <button type="button" class="chip" id="sel-show" hidden>Show next</button>
+        <button type="button" class="chip" id="sel-edit" hidden>Edit</button>
+        <button type="button" class="chip" id="sel-day" hidden>Show on a day…</button>
+        <button type="button" class="chip" id="sel-anyday" hidden>Show any day</button>
+        <select id="sel-move" class="chip" hidden aria-label="Move selected pictures to a folder"></select>
+        <button type="button" class="chip" id="sel-restore" hidden>Restore</button>
+        <button type="button" class="chip danger" id="sel-remove" hidden>Remove</button>
+        <button type="button" class="chip danger" id="sel-purge" hidden>Delete for good</button>
+        <button type="button" class="chip danger" id="remove-all">Remove all</button>
+      </div>
+      <p class="undo-bar" id="undo" role="status" hidden>
+        <span id="undo-text"></span>
+        <button type="button" class="link" id="undo-btn">Undo</button>
+      </p>
+      <p class="hang-mismatch" id="hang-mismatch" hidden>
+        <span id="hang-mismatch-text"></span>
+        <button type="button" class="link" id="hang-rebuild">Rebuild them</button>
+      </p>
+      <ul id="queue" class="queue"></ul>
+      <p class="muted small" id="queue-empty" hidden>Nothing in this folder yet. Add pictures below, or select some and move them here.</p>
     </section>
 
     <section class="card" id="settings-card" hidden>

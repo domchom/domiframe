@@ -291,6 +291,8 @@ input[type=range]:active::-moz-range-thumb { background: var(--accent); border-c
 .balance::-moz-range-progress { background: transparent; }
 
 .msg { min-height: 1.5em; margin: 14px 0 0; font: 14px/1.5 var(--mono); }
+/* No message, no gap at the bottom of the card */
+.msg:empty { min-height: 0; margin: 0; }
 .msg:not(:empty)::before { content: "> "; color: var(--muted); }
 .msg.ok { color: var(--ok); }
 .msg.err { color: var(--accent); }
@@ -298,7 +300,9 @@ input[type=range]:active::-moz-range-thumb { background: var(--accent); border-c
 
 .row { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0 8px; }
 .row.between { justify-content: space-between; align-items: center; margin: 0 0 12px; }
-.stack { display: grid; gap: 12px; }
+.stack { display: grid; gap: 16px; }
+.stack > .slider { margin: 0; }
+.stack > button.primary { margin-top: 8px; }
 
 /* ---- Adding pictures ----------------------------------------------------------- */
 
@@ -457,9 +461,8 @@ input[type=range]:active::-moz-range-thumb { background: var(--accent); border-c
 
 /* ---- Collection ---------------------------------------------------------------- */
 
-#library { margin-top: 32px; padding-top: 24px; border-top: 2px solid var(--line); }
 .cycle { display: flex; gap: 14px; align-items: end; flex-wrap: wrap; margin: 0 0 18px; }
-.cycle .slider { flex: 1; min-width: 200px; margin: 0; }
+.cycle .slider { flex: 1; min-width: 200px; max-width: 420px; margin: 0; }
 .cycle .check { margin: 0 0 10px; }
 
 /* Folders as text tabs */
@@ -544,9 +547,9 @@ details > summary .meta { margin: 0; }
 .intro-grid { display: grid; gap: 34px; margin: 0 0 40px; align-items: center; }
 .headline { font-size: 40px; line-height: 1.02; margin: 10px 0 16px; letter-spacing: -.015em; }
 .lede { font-size: 17px; line-height: 1.6; margin: 0; max-width: 58ch; }
-.cta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 24px; }
+.cta { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; margin-top: 24px; }
 .cta button.primary { width: auto; margin: 0; padding: 16px 22px; }
-.cta .chip { padding: 15px 16px; }
+.cta .chip { display: flex; align-items: center; padding: 0 18px; border-width: 2px; }
 .sample { margin: 0; }
 .sample .print { margin-right: 8px; }
 .sample figcaption { display: flex; align-items: center; gap: 10px; margin: 18px 0 0; font: 12px/1.5 var(--mono); color: var(--muted); }
@@ -614,12 +617,14 @@ details > summary .meta { margin: 0; }
 .frame-head .muted { font: 12px var(--mono); }
 .frame-head .badge { margin-left: auto; }
 .frames li > p { font-family: var(--mono); font-size: 12px; }
+.frames li > .chips { margin-top: 8px; }
 .badge { font: 12px var(--mono); padding: 3px 8px; border: 1.5px solid var(--ink); }
 .badge.warn { border-color: var(--accent); color: var(--accent); }
 .copy-row { display: flex; gap: 6px; margin-top: 6px; }
 .copy-row input { margin: 0; font: 13px/1.4 var(--mono); }
 .qr svg { width: 180px; height: 180px; background: #fff; padding: 6px; display: block; border: 2px solid var(--ink); }
 .admin h2 { font-size: 26px; }
+.admin .card > h2 { margin: 0 0 16px; }
 
 /* ---- Wide screens: the print on the left, the controls beside it --------------- */
 
@@ -656,6 +661,10 @@ details > summary .meta { margin: 0; }
   .picker span { min-height: 88px; }
   .presets { gap: 4px; }
   .presets button { font-size: 9px; letter-spacing: .04em; }
+  /* Keep the wordmark, strip and theme button on one line */
+  .mark { width: 64px; }
+  .admin .brand h1 { font-size: 30px; }
+  .admin .brand .mark { display: none; }
 }
 .print:has(> img[hidden]) { display: none; }
 

@@ -28,12 +28,12 @@
 @media (min-width: 820px) { .panels { grid-template-columns: 1fr 1fr; } }
 .panels .card { margin-bottom: 28px; }
 .card h3 { margin: 0 0 14px; }
-.keys { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 14px; }
+.keys { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; margin: 0 0 14px; }
 .keys button.primary { width: auto; flex: 1 1 180px; margin: 0; padding: 14px 16px; }
 .keys .chip { padding: 12px 14px; }
-.keys .chip.key { flex: 1 1 140px; }
+.keys .chip.key { flex: 1 1 140px; display: flex; align-items: center; justify-content: center; text-align: center; }
 .keys .chip:disabled, .keys button.primary:disabled { opacity: .45; cursor: default; }
-.skip .chip { flex: 1; padding: 10px 8px; }
+.skip .chip { flex: 1; padding: 10px 8px; white-space: nowrap; }
 #clock { font: 12px/1.4 var(--mono); color: var(--muted); margin: 0; }
 .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
 .fields .slider { margin: 0 0 14px; }
