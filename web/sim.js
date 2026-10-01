@@ -20,6 +20,10 @@ function setScreen(id) {
 }
 let hang = "landscape";
 let hangPending = null; // chosen here, not yet confirmed by the server
+// Same for the screen size. Unlike the firmware (built for one screen, so it always says), the
+// virtual frame only reports a size when one is picked here; otherwise it takes the server's,
+// which is the size chosen when the frame was created on the admin page.
+let screenPending = null;
 // Hung the other way from how the panel's rows run: pictures arrive turned 90° clockwise
 const turned = () => (hang === "portrait") !== (H > W);
 function show() {
@@ -213,10 +217,19 @@ async function wake(reason) {
     const headers = { "X-Device-Key": key, "X-Battery-Mv": $("mv").value, "X-Fw": FW };
     if (etag) headers["If-None-Match"] = etag;
     if (hangPending) headers["X-Set-Orientation"] = hangPending; // like the real frame's setup portal
-    headers["X-Panel"] = screenSize; // the firmware reports the screen it was built for
+    if (screenPending) headers["X-Panel"] = screenPending;
     const res = await fetch(`/api/frames/${encodeURIComponent(id)}/image`, { headers, cache: "no-store" });
     const sleep = Number(res.headers.get("x-sleep-minutes")) || 0;
-    if (res.ok || res.status === 304) hangPending = null; // the server has it now
+    if (res.ok || res.status === 304) hangPending = screenPending = null; // the server has them now
+    const newScreen = res.headers.get("x-panel");
+    if (newScreen && PANELS[newScreen] && newScreen !== screenSize) {
+      setScreen(newScreen);
+      store.set(`screen:${id}`, screenSize);
+      $("screen-size").value = screenSize;
+      etag = ""; // pictures for this screen size
+      log(`server says the screen is ${screenSize}"`);
+      show();
+    }
     const newHang = res.headers.get("x-orientation");
     if (newHang && newHang !== hang) {
       hang = newHang;
@@ -261,7 +274,8 @@ async function wake(reason) {
 $("key1").addEventListener("click", () => wake("KEY1"));
 $("screen-size").addEventListener("change", () => {
   setScreen($("screen-size").value);
-  store.set("screen", screenSize);
+  screenPending = screenSize;
+  store.set(`screen:${$("id").value.trim()}`, screenSize);
   etag = ""; // a new screen: fetch the picture made for it
   log(`screen is now ${screenSize}"; telling the server`);
   show();
@@ -319,7 +333,9 @@ $("clock-reset").addEventListener("click", async () => { await clock({ reset: tr
 showClock();
 
 // Blank panel until first wake, like a fresh device.
-setScreen(hash.get("screen") || store.get("screen") || "7.3");
+// The size from the admin page's link, or what this frame was last time; the server's reply
+// to the first check-in settles it either way
+setScreen(hash.get("screen") || store.get(`screen:${$("id").value.trim()}`) || "7.3");
 $("screen-size").value = screenSize;
 ctx.fillStyle = rgb(1); ctx.fillRect(0, 0, W, H);
 show();

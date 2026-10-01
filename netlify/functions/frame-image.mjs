@@ -69,8 +69,13 @@ async function deviceFetch(req, id, frame) {
     fw: (req.headers.get("x-fw") || "").slice(0, 20) || null,
     sleepMinutes,
   });
-  // How the frame hangs, for the virtual frame's display (the real one just draws the bytes)
-  const sleep = { "x-sleep-minutes": String(sleepMinutes), "x-orientation": frame.settings?.orientation || "landscape" };
+  // How the frame hangs and its screen size, for the virtual frame (the real one just draws the
+  // bytes, and knows its own screen): it takes the size chosen when the frame was created
+  const sleep = {
+    "x-sleep-minutes": String(sleepMinutes),
+    "x-orientation": frame.settings?.orientation || "landscape",
+    "x-panel": frame.settings?.panel || "7.3",
+  };
 
   // Never send a picture made for another screen size: the frame would reject the byte count
   const pic = state.pictures.find((p) => p.id === state.current && fitsPanel(p, frame.settings));

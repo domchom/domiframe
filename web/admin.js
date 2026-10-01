@@ -186,7 +186,8 @@ function showResult(id, data, title) {
   body.append(field("Device key: enter in the frame's setup portal", data.deviceKey));
   // No hardware yet? The virtual frame does what the real one does, in a browser tab
   const a = el("a", "chip", "Open as a virtual frame");
-  a.href = `/sim.html#id=${id}&key=${encodeURIComponent(data.deviceKey)}`;
+  // With the screen chosen above, so the virtual frame starts as that screen
+  a.href = `/sim.html#id=${id}&key=${encodeURIComponent(data.deviceKey)}&screen=${encodeURIComponent(data.settings?.panel || $("new-panel").value)}`;
   a.target = "_blank";
   a.rel = "noopener";
   body.append(a);

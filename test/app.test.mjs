@@ -435,13 +435,21 @@ test("13.3-inch frames: bigger pictures, and never a picture made for the other 
   assert.equal((await f.post(await f.form(0x23, { bytes: 192000 }))).status, 400, "a 7.3-inch picture doesn't fit");
   assert.equal((await f.post(await f.form(0x23, { bytes: 960000 }))).status, 200);
 
-  let res = await f.dev({ "x-panel": "13.3" });
+  // A check-in that doesn't say its size (the virtual frame) keeps the size chosen at creation,
+  // and the reply says what it is
+  let res = await f.dev();
+  assert.equal(res.headers.get("x-panel"), "13.3");
+  assert.equal((await f.drawn(res)).byteLength, 960000);
+  assert.equal((await f.info()).settings.panel, "13.3");
+
+  res = await f.dev({ "x-panel": "13.3" });
   assert.equal(res.status, 200);
   assert.equal((await f.drawn(res)).byteLength, 960000);
 
   // The frame says it's a 7.3" after all: the 13.3" picture is not sent
   res = await f.dev({ "x-panel": "7.3" });
   assert.equal(res.status, 204);
+  assert.equal(res.headers.get("x-panel"), "7.3");
   const info = await f.info();
   assert.equal(info.settings.panel, "7.3");
   assert.equal(info.pictures[0].panel, "13.3");
