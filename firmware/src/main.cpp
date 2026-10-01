@@ -48,6 +48,10 @@ EPaper epaper;
 #include <GxEPD2_7C.h>
 #include <Fonts/FreeSansBold18pt7b.h>
 #include <Fonts/FreeSans12pt7b.h>
+#include <Fonts/FreeMonoBold9pt7b.h>
+#include <Fonts/FreeMonoBold12pt7b.h>
+#include <Fonts/FreeMonoBold18pt7b.h>
+#include <Fonts/FreeMonoBold24pt7b.h>
 #define PANEL_ID "7.3"
 static const int W = 800, H = 480;
 static const bool NATIVE_PORTRAIT = false;
@@ -114,21 +118,6 @@ int makeQr(const char* text) {
   return qrSize;
 }
 
-// Where the QR code goes on a w x h screen (after rotation) with `margin` around it: to the
-// right of the text when the screen is wide, below the text and color bars when it's tall.
-void qrPlace(int w, int h, int module, int margin, int& x, int& y) {
-  int side = (qrSize + 8) * module;  // with the 4-module quiet zone all round
-  if (w > h) {
-    x = w - margin - side;
-    y = (h - side) / 2;
-  } else {
-    x = (w - side) / 2;
-    y = h - margin - side;
-  }
-  x += 4 * module;
-  y += 4 * module;
-}
-
 // ---------------------------------------------------------------------------
 
 void displayPower(bool on) {
@@ -139,33 +128,35 @@ void displayPower(bool on) {
 
 #if defined(DOMIFRAME_PANEL_13IN3)
 
-// qr: optional text to show as a QR code (made with makeQr first)
-void showMessage(const char* title, const char* line1, const char* line2 = nullptr, bool qr = false) {
+// Drawing for messages (see showMessage): sizes are the 7.3"'s, drawn S times as big here
+static const int S = 2;
+
+template <typename Paint>
+void drawScreen(Paint paint) {
   displayPower(true);
   epaper.begin();
-  epaper.setRotation(turned() ? 1 : 0);
+  epaper.setRotation(turned() ? 1 : 0);  // upright however the frame hangs
   epaper.fillScreen(TFT_WHITE);
-  epaper.setTextColor(TFT_BLACK, TFT_WHITE);
-  epaper.setTextDatum(TL_DATUM);
-  // The 7.3" layout, doubled
-  epaper.setFreeFont(&FreeSansBold18pt7b);
-  epaper.setTextSize(2);
-  epaper.drawString(title, 80, 180);
-  epaper.setFreeFont(&FreeSans12pt7b);
-  epaper.drawString(line1, 80, 320);
-  if (line2) epaper.drawString(line2, 80, 400);
-  const uint16_t bars[4] = {TFT_RED, TFT_YELLOW, TFT_GREEN, TFT_BLUE};
-  for (int i = 0; i < 4; i++) epaper.fillRect(80 + i * 120, 800, 120, 24, bars[i]);
-  if (qr && qrSize) {
-    const int m = 10;
-    int qx, qy;
-    qrPlace(epaper.width(), epaper.height(), m, 80, qx, qy);
-    for (int y = 0; y < qrSize; y++)
-      for (int x = 0; x < qrSize; x++)
-        if (qrDots[y][x]) epaper.fillRect(qx + x * m, qy + y * m, m, m, TFT_BLACK);
-  }
+  paint();
   epaper.update();
   epaper.sleep();
+}
+
+int screenW() { return epaper.width() / S; }
+int screenH() { return epaper.height() / S; }
+void inkRect(int x, int y, int w, int h, int ink) { epaper.fillRect(x * S, y * S, w * S, h * S, PALETTE[ink]); }
+// Text with its baseline at y
+void inkText(const char* text, int x, int y, const GFXfont* font, int ink) {
+  epaper.setFreeFont(font);
+  epaper.setTextSize(S);
+  epaper.setTextColor(PALETTE[ink]);
+  epaper.setTextDatum(L_BASELINE);
+  epaper.drawString(text, x * S, y * S);
+}
+int textWidth(const char* text, const GFXfont* font) {
+  epaper.setFreeFont(font);
+  epaper.setTextSize(1);
+  return epaper.textWidth(text);
 }
 
 void drawPacked(const uint8_t* buf) {
@@ -192,39 +183,40 @@ void displayBegin() {
   display.setRotation(0);
 }
 
-// qr: draw the QR code made by makeQr as well
-void showMessage(const char* title, const char* line1, const char* line2 = nullptr, bool qr = false) {
+// Drawing for messages (see showMessage), at the 7.3"'s own size
+static const int S = 1;
+
+template <typename Paint>
+void drawScreen(Paint paint) {
   displayBegin();
   display.setFullWindow();
   display.firstPage();
   do {
     display.setRotation(turned() ? 1 : 0);  // upright however the frame hangs
     display.fillScreen(GxEPD_WHITE);
-    display.setTextColor(GxEPD_BLACK);
-    display.setFont(&FreeSansBold18pt7b);
-    display.setCursor(40, 120);
-    display.print(title);
-    display.setFont(&FreeSans12pt7b);
-    display.setCursor(40, 190);
-    display.print(line1);
-    if (line2) {
-      display.setCursor(40, 230);
-      display.print(line2);
-    }
-    display.fillRect(40, 400, 60, 12, GxEPD_RED);
-    display.fillRect(100, 400, 60, 12, GxEPD_YELLOW);
-    display.fillRect(160, 400, 60, 12, GxEPD_GREEN);
-    display.fillRect(220, 400, 60, 12, GxEPD_BLUE);
-    if (qr && qrSize) {
-      const int m = 5;
-      int qx, qy;
-      qrPlace(display.width(), display.height(), m, 40, qx, qy);
-      for (int y = 0; y < qrSize; y++)
-        for (int x = 0; x < qrSize; x++)
-          if (qrDots[y][x]) display.fillRect(qx + x * m, qy + y * m, m, m, GxEPD_BLACK);
-    }
+    paint();
   } while (display.nextPage());
   display.hibernate();
+}
+
+int screenW() { return display.width() / S; }
+int screenH() { return display.height() / S; }
+void inkRect(int x, int y, int w, int h, int ink) { display.fillRect(x * S, y * S, w * S, h * S, PALETTE[ink]); }
+// Text with its baseline at y
+void inkText(const char* text, int x, int y, const GFXfont* font, int ink) {
+  display.setFont(font);
+  display.setTextSize(S);
+  display.setTextColor(PALETTE[ink]);
+  display.setCursor(x * S, y * S);
+  display.print(text);
+}
+int textWidth(const char* text, const GFXfont* font) {
+  display.setFont(font);
+  display.setTextSize(1);
+  int16_t x1, y1;
+  uint16_t w, h;
+  display.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+  return x1 + w;
 }
 
 void drawPacked(const uint8_t* buf) {
@@ -245,6 +237,55 @@ void drawPacked(const uint8_t* buf) {
 }
 
 #endif
+
+// ---- Messages ----------------------------------------------------------------
+// Laid out like the website: the wordmark and its strip of the six inks over a rule, small
+// red labels, big black text, a rule and a note at the foot. Sizes are for the 7.3" (S scales
+// them on the 13.3"); every screen is at least 480 x 480 of these units, upright either way.
+
+enum Ink { INK_BLACK, INK_WHITE, INK_YELLOW, INK_RED, INK_BLUE, INK_GREEN };  // PALETTE order
+static const int MARGIN = 40, HEAD = 88;               // HEAD: the rule under the wordmark
+
+void drawHeader(int w) {
+  inkText("DomiFrame", MARGIN + 2, 68, &FreeSansBold18pt7b, INK_RED);  // offset shadow, as on the site
+  inkText("DomiFrame", MARGIN, 66, &FreeSansBold18pt7b, INK_BLACK);
+  const int strip[6] = {INK_BLACK, INK_BLUE, INK_GREEN, INK_YELLOW, INK_RED, INK_WHITE};
+  int x = MARGIN + textWidth("DomiFrame", &FreeSansBold18pt7b) + 20;
+  inkRect(x - 2, 44, 6 * 16 + 4, 16, INK_BLACK);  // outlined, so the white block shows
+  for (int i = 0; i < 6; i++) inkRect(x + i * 16, 46, 16, 12, strip[i]);
+  inkRect(MARGIN, HEAD - 3, w - 2 * MARGIN, 3, INK_BLACK);
+}
+
+// Two lines at the bottom, under a thin rule; returns where the rule is
+int drawFooter(int w, int h, const char* line1, const char* line2) {
+  int y = h - MARGIN - 62;
+  inkRect(MARGIN, y, w - 2 * MARGIN, 1, INK_BLACK);
+  inkText(line1, MARGIN, y + 32, &FreeSans12pt7b, INK_BLACK);
+  if (line2) inkText(line2, MARGIN, y + 62, &FreeSans12pt7b, INK_BLACK);
+  return y;
+}
+
+void showMessage(const char* title, const char* line1, const char* line2 = nullptr) {
+  drawScreen([&] {
+    drawHeader(screenW());
+    inkText(title, MARGIN, HEAD + 70, &FreeSansBold18pt7b, INK_BLACK);
+    inkText(line1, MARGIN, HEAD + 130, &FreeSans12pt7b, INK_BLACK);
+    if (line2) inkText(line2, MARGIN, HEAD + 166, &FreeSans12pt7b, INK_BLACK);
+  });
+}
+
+// The QR code made by makeQr, QR_MODULE units a module, with its quiet zone and a black border;
+// (x, y) is the border's top-left corner
+static const int QR_MODULE = 5;
+int qrSide() { return (qrSize + 8) * QR_MODULE + 6; }
+void drawQr(int x, int y) {
+  int side = qrSide();
+  inkRect(x, y, side, side, INK_BLACK);
+  inkRect(x + 3, y + 3, side - 6, side - 6, INK_WHITE);
+  for (int r = 0; r < qrSize; r++)
+    for (int c = 0; c < qrSize; c++)
+      if (qrDots[r][c]) inkRect(x + 3 + (c + 4) * QR_MODULE, y + 3 + (r + 4) * QR_MODULE, QR_MODULE, QR_MODULE, INK_BLACK);
+}
 
 int readBatteryMv() {
   pinMode(BAT_ADC_ENABLE_PIN, OUTPUT);
@@ -368,13 +409,41 @@ bool unsealPicture(const uint8_t* sealed, uint8_t* out) {
   return rc == 0;
 }
 
+// The frame code in two big lines, the frame ID under it, and a QR code: beside them on a
+// wide screen, under them on a tall one
 void showCodeScreen() {
-  String line1 = "Frame ID: " + frameId;  // short lines: they fit a portrait 7.3" too
   // The QR code opens the frame's page with the code filled in. It's after the #, which
   // browsers never send to the server.
   String link = String(SERVER_BASE) + "/f/" + frameId + "#k=" + frameCode;
   bool qr = makeQr(link.c_str()) > 0;
-  showMessage(frameCode.c_str(), line1.c_str(), qr ? "Scan, or use both at domiframe.art" : "Use both at domiframe.art", qr);
+  bool split = frameCode.length() == 19;  // XXXX-XXXX / XXXX-XXXX
+  String codeTop = split ? frameCode.substring(0, 9) : frameCode;
+  String codeBottom = split ? frameCode.substring(10) : "";
+  drawScreen([&] {
+    int w = screenW(), h = screenH();
+    drawHeader(w);
+    int foot = drawFooter(w, h, qr ? "Scan with a phone camera, or" : "Enter both at domiframe.art,",
+                          qr ? "enter both at domiframe.art." : "under My frame.");
+
+    inkText("FRAME CODE", MARGIN, HEAD + 44, &FreeMonoBold9pt7b, INK_RED);
+    int y = HEAD + 94;
+    inkText(codeTop.c_str(), MARGIN, y, &FreeMonoBold24pt7b, INK_BLACK);
+    if (split) inkText(codeBottom.c_str(), MARGIN, y += 48, &FreeMonoBold24pt7b, INK_BLACK);
+
+    bool wide = w > h;
+    int side = qr ? qrSide() : 0;
+    int room = (qr && wide ? w - MARGIN - side - 24 : w - MARGIN) - MARGIN;  // for the ID
+    inkText("FRAME ID", MARGIN, y += 48, &FreeMonoBold9pt7b, INK_RED);
+    const GFXfont* idFont = &FreeMonoBold18pt7b;
+    if (textWidth(frameId.c_str(), idFont) > room) idFont = &FreeMonoBold12pt7b;
+    if (textWidth(frameId.c_str(), idFont) > room) idFont = &FreeMonoBold9pt7b;
+    inkText(frameId.c_str(), MARGIN, y += 34, idFont, INK_BLACK);
+
+    if (qr) {
+      int top = wide ? HEAD : y + 20;  // centered in the space left
+      drawQr(wide ? w - MARGIN - side : (w - side) / 2, top + (foot - top - side) / 2);
+    }
+  });
   etag = "";  // the picture comes back at the next wake
   saveString("etag", etag);
 }
