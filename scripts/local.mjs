@@ -65,6 +65,9 @@ const TYPES = {
   ".jpg": "image/jpeg",
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
+  ".webmanifest": "application/manifest+json",
+  ".txt": "text/plain; charset=utf-8",
+  ".xml": "application/xml",
 };
 
 // The same security headers as the real site, read from netlify.toml, so a page that breaks the
@@ -112,7 +115,8 @@ const server = createServer(async (req, res) => {
     }
     const file = await serveStatic(url.pathname);
     if (!file) {
-      res.writeHead(404, common).end("not found");
+      const page = url.pathname.startsWith("/api/") ? null : await serveStatic("/404.html"); // like Netlify
+      res.writeHead(404, { ...common, "content-type": page ? page.type : "text/plain" }).end(page ? page.body : "not found");
       return;
     }
     res.writeHead(200, { ...common, "content-type": file.type, "cache-control": "no-store" }).end(file.body);

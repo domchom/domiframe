@@ -30,7 +30,7 @@ Each frame keeps up to 200 pictures, optionally sorted into folders; the frame c
 | `web/admin.html` | Admin page: create frames, see battery and check-ins, replace keys |
 | `firmware/` | PlatformIO project for the EE04 |
 | `test/` | `npm test`: dithering, scheduling, full API flow against a local Blobs server |
-| `scripts/` | `npm run local`: local server + virtual frame |
+| `scripts/` | `npm run local`: local server + virtual frame; `make-icons.py` redraws the favicons and link-preview image |
 | `.github/workflows/ci.yml` | Runs the tests and compiles the firmware on every push |
 
 ## API

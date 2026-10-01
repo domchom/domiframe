@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: /admin.html
+Disallow: /sim.html
+Disallow: /f/
+
+Sitemap: https://domiframe.art/sitemap.xml
