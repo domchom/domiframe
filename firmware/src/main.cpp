@@ -695,6 +695,12 @@ void setup() {
   bool wantSetup = frameId.isEmpty() || deviceKey.isEmpty() || digitalRead(BTN_SETUP) == LOW;
   // KEY1 held while pressing reset (not a KEY1 wake from sleep): show the frame code again
   bool wantCode = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED && digitalRead(BTN_REFRESH) == LOW;
+  // A code the server already knows is kept here, so show it without Wi-Fi: someone whose
+  // network changed can still read it before redoing setup
+  if (wantCode && !wantSetup && !frameCode.isEmpty() && !codePending) {
+    showCodeScreen();
+    goToSleep();
+  }
 
   bool online = wantSetup ? runSetupPortal() : connectWifi();
   if (!online) {

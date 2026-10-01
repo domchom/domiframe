@@ -119,7 +119,7 @@ Save the response and enter `id` + `deviceKey` on the frame (below). The frame t
    - 13.3" on EE02: `cd firmware && pio run -e ee02-13in3 -t upload`
 3. On first boot the screen says **Wi-Fi setup** with a password. Join the `DomiFrame-Setup` Wi-Fi from a phone with that password, pick the home network, fill in **Frame ID** and **Device key**, and choose how the frame hangs (landscape or portrait). The orientation can also be changed later on the upload or admin page.
 4. The frame connects, makes its **frame code** and shows it with the frame ID and a **QR code**. Scan the QR code to open the frame's page with the code filled in, or enter the ID and code under **My frame** on domiframe.art.
-5. To redo setup later (new home Wi-Fi, or a new frame code), hold **KEY3** while pressing reset. Hold **KEY1** while pressing reset to show the code again.
+5. To redo setup later (new home Wi-Fi, or a new frame code), hold **KEY3** while pressing reset. Hold **KEY1** while pressing reset to show the code again (no Wi-Fi needed).
 6. **KEY1** wakes the frame to check for a new picture immediately.
 
 You can do step 3 yourself with your own Wi-Fi before gifting it; then have your friend redo setup at home and tick *Make a new frame code*, so you never know their code.
