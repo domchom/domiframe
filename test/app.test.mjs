@@ -620,3 +620,52 @@ test("the date a photo was taken comes from its EXIF data", async () => {
   assert.equal(await dateTaken(new Blob([jpeg({ original: "2024:03:12 18:30:00" }).buffer])), "2024-03-12");
   assert.equal(await dateTaken(new Blob([])), null);
 });
+
+// ---- Alerts --------------------------------------------------------------------------
+
+test("alerts: sign up with the frame code, get told when it's late, stop with a new code", async () => {
+  const frameAlerts = (await import("../netlify/functions/frame-alerts.mjs")).default;
+  const { runAlerts } = await import("../netlify/functions/send-alerts.mjs");
+  const f = await newFrame("alerted");
+  const alerts = (method, body, token = f.auth) => frameAlerts(new Request(url(`/api/frames/${f.id}/alerts`), {
+    method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body),
+  }), f.ctx);
+  const apns = { apns: "ab".repeat(32), sandbox: true };
+  const other = { apns: "cd".repeat(32) };
+
+  assert.equal((await alerts("PUT", apns, "wrong")).status, 404);
+  assert.equal((await alerts("PUT", { apns: "not-a-token" })).status, 400);
+  // Signing up gives a frame still on UTC this device's time zone, for daytime-only alerts
+  const tzs = ["UTC", "Europe/Berlin", "America/New_York", "Asia/Tokyo", "America/Los_Angeles", "Asia/Kolkata", "Australia/Sydney", "Pacific/Auckland"];
+  const { localHour } = await import("../netlify/lib/schedule.mjs");
+  const later = Date.now() + 6 * 3600e3;
+  const tz = tzs.find((z) => { const h = localHour(later, z); return h >= 9 && h < 20; });
+  assert.equal((await alerts("PUT", { ...apns, tz })).status, 200);
+  assert.equal((await alerts("PUT", other)).status, 200);
+  assert.equal((await (await f.call("info")).json()).settings.tz, tz);
+
+  assert.equal((await f.dev()).status < 300, true); // checks in now, battery fine
+  const got = [];
+  const send = async (sub, payload) => { got.push({ sub, payload }); return sub.token === other.apns ? "gone" : "ok"; };
+  assert.deepEqual(await runAlerts({ send }), [], "on time: nothing");
+  const sent = await runAlerts({ at: later, send });
+  assert.equal(sent.length, 1);
+  assert.equal(got.length, 2);
+  assert.equal(got[0].payload.title, "alerted is late");
+  assert.equal(got[0].payload.frame, "alerted");
+  got.length = 0;
+  assert.deepEqual(await runAlerts({ at: later + 3600e3, send }), [], "told once");
+  assert.equal(got.length, 0);
+
+  // The other phone's token was gone, so only this one is left; then it stops too
+  assert.equal((await alerts("DELETE", apns)).status, 200);
+  await runAlerts({ at: later, send });
+  assert.equal(got.length, 0);
+
+  // A new code stops alerts asked for with the old one
+  assert.equal((await alerts("PUT", apns)).status, 200);
+  await claim(f.id, f.deviceKey);
+  assert.equal((await alerts("PUT", apns)).status, 404, "the old code no longer works");
+  const { pushes } = await import("../netlify/lib/common.mjs");
+  assert.equal(await pushes().get(f.id), null);
+});

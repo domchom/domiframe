@@ -26,3 +26,10 @@
     Cross-Origin-Opener-Policy = "same-origin"
     Cross-Origin-Resource-Policy = "same-origin"
     Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+
+# Universal links: the iPhone app opens invite links (/f/*) itself. Apple fetches this file from
+# both domiframe.art and www.domiframe.art; it must be JSON and must not redirect.
+[[headers]]
+  for = "/.well-known/apple-app-site-association"
+  [headers.values]
+    Content-Type = "application/json"

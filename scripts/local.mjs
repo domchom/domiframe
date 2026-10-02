@@ -28,6 +28,9 @@ const admin = (await import("../netlify/functions/admin-frames.mjs")).default;
 const frameImage = (await import("../netlify/functions/frame-image.mjs")).default;
 const frameInfo = (await import("../netlify/functions/frame-info.mjs")).default;
 const frameCode = (await import("../netlify/functions/frame-code.mjs")).default;
+const frameAlerts = (await import("../netlify/functions/frame-alerts.mjs")).default;
+const { runAlerts } = await import("../netlify/functions/send-alerts.mjs");
+const { sendTo } = await import("../netlify/lib/push.mjs");
 const { loadFrame } = await import("../netlify/lib/common.mjs");
 globalThis.__domiframeClockOffset = 0;
 
@@ -37,6 +40,7 @@ function route(pathname) {
   if ((m = pathname.match(/^\/api\/admin\/frames(?:\/([^/]+)(?:\/(?:keys|settings))?)?$/))) return { fn: admin, params: m[1] ? { id: m[1] } : {} };
   if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/image$/))) return { fn: frameImage, params: { id: m[1] } };
   if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/code$/))) return { fn: frameCode, params: { id: m[1] } };
+  if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/alerts$/))) return { fn: frameAlerts, params: { id: m[1] } };
   if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/(?:info|preview|settings|restore|trash|pictures(?:\/[^/]+){0,2}|albums(?:\/[^/]+)?)$/))) {
     return { fn: frameInfo, params: { id: m[1] } };
   }
@@ -55,6 +59,28 @@ async function devClock(req, res) {
   const offset = globalThis.__domiframeClockOffset || 0;
   res.writeHead(200, { "content-type": "application/json" });
   res.end(JSON.stringify({ now: new Date(Date.now() + offset).toISOString(), offsetMinutes: Math.round(offset / 60e3) }));
+}
+
+// Alerts are checked every half hour, as on Netlify (functions/send-alerts.mjs); POST
+// /__dev/alerts checks now. APNs only sends with APNS_* set; otherwise the alert is printed here.
+const apnsSet = !!process.env.APNS_KEY;
+const devSend = (sub, payload) => {
+  if (sub.kind === "apns" && !apnsSet) {
+    console.log(`alert (APNs not set up) to ${sub.token.slice(0, 8)}…: ${payload.title}: ${payload.body}`);
+    return "ok";
+  }
+  return sendTo(sub, payload);
+};
+const checkAlerts = async () => {
+  const sent = await runAlerts({ send: devSend });
+  for (const a of sent) console.log(`alert for ${a.id}: ${a.title} (${a.to} got it)`);
+  return sent;
+};
+setInterval(() => checkAlerts().catch((e) => console.error("alerts:", e)), 30 * 60e3);
+async function devAlerts(req, res) {
+  const sent = await checkAlerts();
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify({ sent }));
 }
 
 const TYPES = {
@@ -81,6 +107,9 @@ const SECURITY_HEADERS = Object.fromEntries(
 async function serveStatic(pathname) {
   if (pathname.startsWith("/f/")) pathname = "/upload.html"; // netlify.toml redirect
   if (pathname === "/") pathname = "/index.html";
+  if (pathname === "/.well-known/apple-app-site-association") {
+    return { body: await readFile(join(ROOT, "web", pathname)), type: "application/json" }; // as netlify.toml
+  }
   const base = join(ROOT, "web");
   const file = normalize(join(base, pathname));
   if (!file.startsWith(base)) return null;
@@ -96,6 +125,7 @@ const server = createServer(async (req, res) => {
   const common = SECURITY_HEADERS;
   try {
     if (url.pathname === "/__dev/clock") return devClock(req, res);
+    if (url.pathname === "/__dev/alerts" && req.method === "POST") return devAlerts(req, res);
     const r = route(url.pathname);
     if (r) {
       const chunks = [];

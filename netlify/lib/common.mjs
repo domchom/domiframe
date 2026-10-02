@@ -31,6 +31,7 @@ export const frames = () => store("frames"); // <id> -> { name, uploadKeyHash, d
 export const images = () => store("images"); // <id>/<picId>.bin (frame), .png (preview), .jpg (original), .thumb (grid), all sealed
 export const status = () => store("status"); // <id> -> { lastSeen, batteryMv, fw, sleepMinutes }
 export const states = () => store("state"); // <id> -> picture queue, see lib/schedule.mjs
+export const pushes = () => store("push"); // <id> -> where to send alerts about it, see lib/alerts.mjs
 
 // Local dev (scripts/local.mjs) can move the clock forward to test schedules.
 export const now = () => Date.now() + (globalThis.__domiframeClockOffset || 0);

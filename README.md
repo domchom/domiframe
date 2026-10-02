@@ -19,6 +19,11 @@ Frame (wakes on schedule or KEY1) ──GET + ETag────────┘
 
 Each frame keeps up to 200 pictures, optionally sorted into folders; the frame cycles through one folder or all of them, in order or shuffled. New ones go up at the next check-in; any picture can be put up next on demand, or set to show only on a day (a birthday, every year); otherwise the frame rotates through them on a schedule (every hour, 3/6/12 hours, day, 3 days, week, or only when something new arrives). The server also decides when the frame wakes next: the check-in interval, quiet hours overnight, and fewer check-ins when the battery is low. When a check-in doesn't get through (no Wi-Fi, server down), the frame retries at its usual interval (`X-Retry-Minutes`), waiting twice as long after each failure in a row, up to 12 hours. When the battery is all but empty, the frame stops checking in and leaves its picture up (e-paper needs no power to keep it); it starts again once it's charged. Removed pictures stay in Recently removed for 30 days, so they can be put back. All of this is set per frame on the upload or admin page, with no reflashing.
 
+## Several frames, and alerts
+
+- **Also send to:** anyone with more than one frame opened on their device can send the same photos to several at once, from the upload page or the iPhone app. Each frame gets its own copy, made for its screen and orientation with the same crop, look and text, and sealed with its own code.
+- **Alerts (iPhone app):** the app can tell you when a frame is late or its battery is low. The app registers its push token per frame (`/api/frames/:id/alerts`); every half hour `netlify/functions/send-alerts.mjs` checks those frames (`netlify/lib/alerts.mjs`) and sends through APNs (`netlify/lib/push.mjs`). Each problem is told once until it's over, and only between 8:00 and 21:00 where the frame hangs. A new frame code stops all of a frame's alerts. Locally, `POST /__dev/alerts` runs the check now and prints alerts if no APNs key is set.
+
 ## Repo layout
 
 | Path | What it is |
@@ -60,6 +65,7 @@ Each frame keeps up to 200 pictures, optionally sorted into folders; the frame c
 | `POST /api/frames/:id/restore` `{ids}` | upload key | Put pictures back from the trash |
 | `DELETE /api/frames/:id/trash` `{ids}\|{all: true}` | upload key | Delete pictures in the trash for good (otherwise after 30 days) |
 | `POST /api/frames/:id/albums` `{name}` | upload key | New folder |
+| `PUT`/`DELETE /api/frames/:id/alerts` `{apns, sandbox?, tz?}` | upload key | Start/stop alerts to the iPhone app when the frame is late or its battery is low |
 | `PATCH`/`DELETE /api/frames/:id/albums/:album` | upload key | Rename / delete (`?pictures=keep\|delete`) |
 
 "admin" means `Authorization: Bearer <ADMIN_TOKEN>`; "upload key" means `Authorization: Bearer <token derived from the frame code>` (below). The admin token does **not** open any frame's pictures.
@@ -95,6 +101,7 @@ The frame's code screen also has a QR code of `https://domiframe.art/f/<id>#k=<c
 
 1. New site from this GitHub repo. Build settings come from `netlify.toml` (publish `web`, functions `netlify/functions`). Pushes that only change firmware, tests or docs skip the deploy (`ignore` in `netlify.toml`), which saves credits on the Free plan.
 2. **Site configuration → Environment variables:** add `ADMIN_TOKEN` (a long random string, e.g. `openssl rand -base64 32`). Optionally `PUBLIC_URL=https://domiframe.art`.
+   For the iPhone app's alerts, also add an APNs key (Apple Developer → Certificates, IDs & Profiles → Keys, with Apple Push Notifications service): `APNS_KEY` (the `.p8` file's contents), `APNS_KEY_ID`, `APNS_TEAM_ID`, and `APNS_TOPIC` if the app's bundle ID isn't `art.domiframe.app`. Without them, nothing is sent.
 3. **Domain management:** add `domiframe.art` and follow Netlify's DNS instructions at your registrar.
 
 ## Add a frame

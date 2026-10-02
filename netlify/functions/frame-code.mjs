@@ -6,10 +6,11 @@
 //        stops working. Everything uploaded was sealed with the old code's key, so the frame's
 //        pictures and folders are put aside (see OLD_CODE_DAYS in lib/common.mjs): if the frame
 //        goes back to the old code within that time, they come back.
+//        Alerts stop too: they were asked for by people with the old code.
 //        -> 200 { ok, putAway, restored } (sending the same hash again changes nothing)
 
 import {
-  frames, states, loadFrame, keyMatches, json, now, loadState, sameHash, HASH_RE,
+  frames, states, pushes, loadFrame, keyMatches, json, now, loadState, sameHash, HASH_RE,
   asideKey, oldCodeFresh, deleteAside,
 } from "../lib/common.mjs";
 import { normalizeState } from "../lib/schedule.mjs";
@@ -49,6 +50,8 @@ export default async (req, context) => {
     ...(keep ? { oldCode: keep } : {}),
     settings: { ...frame.settings, album: null },
   });
+
+  await pushes().delete(id);
 
   // Only one old code is kept: if this puts new pictures aside, the ones before go for good
   if (putAside && !goingBack) await deleteAside(id);
