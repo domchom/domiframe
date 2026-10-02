@@ -1,6 +1,6 @@
 import { sizeFor, toPanelOrder, panelOf, DEFAULTS, ditherWithPreview, pack, indicesToRGBA, PALETTE } from "./dither.js";
 import { ask, tell } from "./dialog.js";
-import { ago, until, batteryPct, LOW_BATTERY_PCT, rotateLabel, checkLabel, hourLabel } from "./format.js";
+import { ago, until, isLate, batteryPct, LOW_BATTERY_PCT, rotateLabel, checkLabel, hourLabel } from "./format.js";
 import { rememberFrame, rememberedFrames, isFrameCode, normalizeCode, frameLink, saveCode, oldCode } from "./code.js";
 import { frameKeys, seal, unseal, sealText, unsealText } from "./seal.js";
 import { dateTaken } from "./exif.js";
@@ -106,13 +106,16 @@ async function loadInfo() {
   const pct = batteryPct(info.batteryMv);
   const low = pct != null && pct < LOW_BATTERY_PCT;
   $("st-seen").textContent = info.lastSeen ? ago(info.lastSeen) : "never";
-  $("st-next").textContent = info.lastSeen ? until(info.nextCheckIn) || "–" : "–";
+  const late = isLate(info.lastSeen, info.nextCheckIn);
+  $("st-next").textContent = !info.lastSeen ? "–" : late ? "late" : until(info.nextCheckIn) || "–";
   $("st-battery").textContent = pct != null ? `${pct}%` : "–";
   $("st-gauge").style.setProperty("--pct", Math.ceil((pct ?? 0) / 10) * 10); // whole segments
   $("st-gauge").classList.toggle("low", low);
   $("frame-status").textContent = !info.lastSeen ? "The frame hasn't checked in yet."
+    : late && low ? `Late: last checked in ${ago(info.lastSeen)}, with its battery low. Time to charge it.`
+    : late ? `Late: last checked in ${ago(info.lastSeen)}. Check the Wi-Fi where it hangs, or press its button.`
     : low ? "Battery low: time to charge it." : "";
-  $("frame-status").classList.toggle("warn", low);
+  $("frame-status").classList.toggle("warn", late || low);
 
   const hangChanged = frameInfo && frameInfo.settings.orientation !== info.settings.orientation;
   frameInfo = info;

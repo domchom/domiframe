@@ -1,5 +1,5 @@
 import { ask, tell } from "./dialog.js";
-import { ago, until, batteryPct, LOW_BATTERY_PCT, rotateLabel } from "./format.js";
+import { ago, until, isLate, batteryPct, LOW_BATTERY_PCT, rotateLabel } from "./format.js";
 
 const $ = (id) => document.getElementById(id);
 // Kept for this tab only: closing it signs out, so the token doesn't sit in the browser.
@@ -69,6 +69,7 @@ function render(frames) {
     const li = document.createElement("li");
     const pct = batteryPct(f.batteryMv);
     const low = pct != null && pct < LOW_BATTERY_PCT;
+    const late = isLate(f.lastSeen, f.nextCheckIn);
     const next = until(f.nextCheckIn);
     const unseen = f.unseen;
 
@@ -80,7 +81,7 @@ function render(frames) {
     const lines = el("p", "muted small");
     lines.textContent = [
       f.lastSeen ? `Checked in ${ago(f.lastSeen)}` : "Never checked in",
-      next && `next ${next}`,
+      late ? "late" : next && `next ${next}`,
       f.fw && `fw ${f.fw}`,
       f.claimed ? "has its frame code" : "waiting for the frame to make its code",
     ].filter(Boolean).join(" · ");

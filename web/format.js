@@ -9,6 +9,18 @@ export function ago(iso) {
   return `${Math.round(s / 86400)} days ago`;
 }
 
+/**
+ * The frame has missed its check-in: well past when it was due. Some slack, since its clock
+ * drifts while it sleeps. A frame that can't get through waits longer each time, and one with an
+ * empty battery stops checking in until it's charged (firmware/src/main.cpp), so the server's
+ * "next check-in" can be long gone.
+ */
+export function isLate(lastSeen, nextCheckIn, now = Date.now()) {
+  if (!lastSeen || !nextCheckIn) return false;
+  const due = Date.parse(nextCheckIn), interval = due - Date.parse(lastSeen);
+  return now > due + Math.max(15 * 60e3, interval * 0.1);
+}
+
 export function until(iso) {
   if (!iso) return null;
   const s = Math.round((new Date(iso) - Date.now()) / 1000);
