@@ -1,7 +1,7 @@
-import { sizeFor, toPanelOrder, panelOf, DEFAULTS, ditherWithPreview, pack, indicesToRGBA, PALETTE } from "./dither.js";
+import { sizeFor, toPanelOrder, panelOf, DEFAULTS, ditherWithPreview, ditherToPalette, pack, indicesToRGBA, PALETTE } from "./dither.js";
 import { ask, tell } from "./dialog.js";
 import { ago, until, isLate, batteryPct, LOW_BATTERY_PCT, rotateLabel, checkLabel, hourLabel } from "./format.js";
-import { rememberFrame, rememberedFrames, isFrameCode, normalizeCode, frameLink, saveCode, oldCode } from "./code.js";
+import { rememberFrame, rememberedFrames, isFrameCode, normalizeCode, frameLink, saveCode, oldCode, savedKey } from "./code.js";
 import { frameKeys, seal, unseal, sealText, unsealText } from "./seal.js";
 import { dateTaken } from "./exif.js";
 
@@ -89,6 +89,7 @@ async function loadInfo() {
   const info = await openInfo(await res.json());
   rememberFrame(frameId, info.name);
   showSwitcher(info.name);
+  showAlsoSend();
   // Friends with the frame code can open this frame anywhere from the home page
   $("device-access").hidden = false;
   $("invite").hidden = false;
@@ -713,20 +714,25 @@ const signed = (v, neg, pos) => (Math.abs(v) < 0.01 ? "neutral" : `${Math.round(
  * the whole photo in (over a blurred copy of itself) when it doesn't, e.g. a portrait photo on a
  * landscape frame, which filling would crop to a thin strip.
  */
-function effectiveFit(o) {
+function effectiveFit(o, panel = framePanel(), src = source) {
   if (o.fit !== "auto") return o.fit;
-  const { w, h } = sizeFor(framePanel(), o.portrait);
-  const ratio = source.width / source.height, target = w / h;
+  const { w, h } = sizeFor(panel, o.portrait);
+  const ratio = src.width / src.height, target = w / h;
   return Math.abs(Math.log(ratio / target)) < 0.35 ? "cover" : "contain";
 }
 
-/** Draw the photo onto a w×h canvas, positioned by fit, zoom and pan. */
-function compose(o, w, h) {
+/**
+ * Draw the photo onto a w×h canvas, positioned by fit, zoom and pan. For another frame (`other`:
+ * its panel and the pan to use), the editor's own pan and drag hint are left alone.
+ */
+function compose(o, w, h, other = null) {
+  const panel = other ? other.panel : framePanel();
+  const at = other ? { ...other.pan } : pan;
   const work = document.createElement("canvas");
   work.width = w;
   work.height = h;
   const ctx = work.getContext("2d", { willReadFrequently: true });
-  const fit = effectiveFit(o);
+  const fit = effectiveFit(o, panel);
   if (o.bg === "blur") {
     // Blur by shrinking to a few pixels and stretching back; fast and works in every browser
     const tiny = document.createElement("canvas");
@@ -746,13 +752,15 @@ function compose(o, w, h) {
   const dw = source.width * scale, dh = source.height * scale;
   // Bigger than the frame: keep it covering the frame. Smaller (zoomed out): keep it inside.
   const maxX = Math.abs(dw - w) / 2, maxY = Math.abs(dh - h) / 2;
-  pan.x = Math.max(-maxX, Math.min(maxX, pan.x));
-  pan.y = Math.max(-maxY, Math.min(maxY, pan.y));
-  const canDrag = maxX || maxY;
-  $("drag-hint").hidden = !canDrag;
-  $("preview").classList.toggle("draggable", !!canDrag);
+  at.x = Math.max(-maxX, Math.min(maxX, at.x));
+  at.y = Math.max(-maxY, Math.min(maxY, at.y));
+  if (!other) {
+    const canDrag = maxX || maxY;
+    $("drag-hint").hidden = !canDrag;
+    $("preview").classList.toggle("draggable", !!canDrag);
+  }
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(source, (w - dw) / 2 + pan.x, (h - dh) / 2 + pan.y, dw, dh);
+  ctx.drawImage(source, (w - dw) / 2 + at.x, (h - dh) / 2 + at.y, dw, dh);
   return ctx.getImageData(0, 0, w, h);
 }
 
@@ -1252,6 +1260,7 @@ async function thumbnailAll() {
 
 let skippedFiles = 0;
 function updateBatch() {
+  showAlsoSend();
   summarizeLooks();
   const n = photos.length;
   const batch = n > 1;
@@ -1580,9 +1589,9 @@ $("from").addEventListener("change", () => {
 showSign();
 
 /** The settings a picture was made with, saved so it can be edited again. */
-function editsOf(p) {
+function editsOf(p, panel = framePanel(), portrait = framePortrait(), at = p.pan) {
   return {
-    v: 3, panel: framePanel(), orientation: framePortrait() ? "portrait" : "landscape", zoom: p.zoom, pan: { x: Math.round(p.pan.x), y: Math.round(p.pan.y) },
+    v: 3, panel, orientation: portrait ? "portrait" : "landscape", zoom: p.zoom, pan: { x: Math.round(at.x), y: Math.round(at.y) },
     look: p.look, label: labelFor(p), sign: signFor(p), caption: p.caption || "", date: p.date, showDate: !!p.showDate, corner: p.corner || "br",
   };
 }
@@ -1599,11 +1608,11 @@ async function originalOf(p) {
 }
 
 /** The dithered picture (not the editor's preview) scaled so its long side is at most `max` px. */
-function scaledPreview(max) {
+function scaledPreview(max, from = dithered) {
   const full = document.createElement("canvas");
-  full.width = dithered.width;
-  full.height = dithered.height;
-  full.getContext("2d").putImageData(dithered, 0, 0);
+  full.width = from.width;
+  full.height = from.height;
+  full.getContext("2d").putImageData(from, 0, 0);
   const k = max / Math.max(full.width, full.height);
   if (k >= 1) return full;
   const c = document.createElement("canvas");
@@ -1648,9 +1657,96 @@ async function prepareUpload(queue = "next") {
   return { path: "image", init: { method: "POST", body: form } };
 }
 
-async function sendUpload({ path, init }) {
-  const res = await api(path, init);
+async function sendUpload({ path, init, target }) {
+  const res = target
+    ? await fetch(`/api/frames/${target.id}/${path}`, { ...init, headers: { ...target.auth, ...init.headers } })
+    : await api(path, init);
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+}
+
+// ---- Sending to more than one frame ---------------------------------------------
+// Other frames opened on this device can get the same photos at the same time, each made for its
+// own screen (size and how it hangs) with the same crop, look and text, sealed with its own code.
+
+function showAlsoSend() {
+  const others = rememberedFrames().filter((f) => f.id !== frameId && isFrameCode(savedKey(f.id)));
+  const box = $("also-frames");
+  const ticked = new Set([...box.querySelectorAll("input:checked")].map((i) => i.value));
+  box.replaceChildren(...others.map((f) => {
+    const label = document.createElement("label");
+    label.className = "check";
+    const input = Object.assign(document.createElement("input"), { type: "checkbox", value: f.id, checked: ticked.has(f.id) });
+    label.append(input, ` ${f.name}`);
+    return label;
+  }));
+  $("also-send").hidden = !others.length || editing;
+}
+
+/** The other frames ticked under Also send to, opened: their keys, screen and folder. */
+async function alsoTargets() {
+  if (editing) return [];
+  const ids = [...$("also-frames").querySelectorAll("input:checked")].map((i) => i.value);
+  return Promise.all(ids.map(async (id) => {
+    const name = rememberedFrames().find((f) => f.id === id)?.name || id;
+    try {
+      const keys = await frameKeys(id, savedKey(id));
+      const auth = { Authorization: `Bearer ${keys.auth}` };
+      const r = await fetch(`/api/frames/${id}/info`, { headers: auth });
+      if (!r.ok) return { id, name, failed: true };
+      const { settings } = await r.json();
+      return {
+        id, name, auth, key: keys.key, panel: settings.panel || "7.3", portrait: settings.orientation === "portrait",
+        album: settings.album, // the folder it shows, so the photo comes round there too
+      };
+    } catch {
+      return { id, name, failed: true };
+    }
+  }));
+}
+
+/** The photo in the editor, made and sealed for another frame. */
+async function prepareFor(t, queue) {
+  const p = photos[cur];
+  const o = { ...opts(), portrait: t.portrait };
+  const { w, h } = sizeFor(t.panel, t.portrait);
+  // The pan is in this frame's pixels: scale it to the other frame's
+  const here = sizeFor(framePanel(), framePortrait());
+  const k = Math.min(w / here.w, h / here.h);
+  const at = { x: pan.x * k, y: pan.y * k };
+  const img = compose(o, w, h, { panel: t.panel, pan: at });
+  const idx = ditherToPalette(img.data, w, h, o);
+  const label = labelParts(p);
+  if (label.title || label.meta) stampLabel(idx, w, h, label);
+  const look = new ImageData(indicesToRGBA(idx), w, h);
+  const [preview, small, original] = await Promise.all([
+    toBlob(scaledPreview(800, look), "image/png"),
+    toBlob(scaledPreview(400, look), "image/jpeg", 0.85),
+    originalOf(p),
+  ]);
+  const sealed = async (blob) => blob && new Blob([await seal(t.key, blob)], { type: "application/octet-stream" });
+  const [sImage, sPreview, sSmall, sOriginal] = await Promise.all([
+    sealed(pack(toPanelOrder(idx, w, h, t.panel))), sealed(preview), sealed(small), sealed(original),
+  ]);
+  const form = new FormData();
+  form.append("image", sImage, "image.bin");
+  form.append("preview", sPreview, "preview.bin");
+  if (sSmall) form.append("thumb", sSmall, "thumb.bin");
+  if (sOriginal) form.append("original", sOriginal, "original.bin");
+  form.append("edits", await sealText(t.key, JSON.stringify(editsOf(p, t.panel, t.portrait, at))));
+  form.append("queue", queue);
+  if (t.album) form.append("album", t.album);
+  const from = $("from").value.trim().slice(0, 40);
+  if (from) form.append("from", await sealText(t.key, from));
+  return { path: "image", init: { method: "POST", body: form }, target: t };
+}
+
+/** "Also sent to Kitchen and Hall." and anything that didn't go. */
+function alsoNote(targets, failedIds) {
+  if (!targets.length) return "";
+  const names = (list) => list.length === 1 ? list[0].name : `${list.slice(0, -1).map((t) => t.name).join(", ")} and ${list.at(-1).name}`;
+  const ok = targets.filter((t) => !failedIds.has(t.id)), bad = targets.filter((t) => failedIds.has(t.id));
+  return (ok.length ? ` Also sent to ${names(ok)}.` : "") +
+    (bad.length ? ` Couldn't send to ${names(bad)}: ${bad.some((t) => t.failed) ? "its code may have changed. Open it from the home page to check" : "try again"}.` : "");
 }
 
 $("send").addEventListener("click", async () => {
@@ -1663,10 +1759,17 @@ $("send").addEventListener("click", async () => {
       await render();
       if (!packed) return;
       msg(editing ? "Saving…" : "Sending…");
+      const targets = await alsoTargets();
       await sendUpload(await prepareUpload());
-      msg(editing
+      const failedIds = new Set(targets.filter((t) => t.failed).map((t) => t.id));
+      for (const t of targets.filter((t) => !t.failed)) {
+        msg(`Sending to ${t.name}…`);
+        try { await sendUpload(await prepareFor(t, "next")); } catch { failedIds.add(t.id); }
+      }
+      msg((editing
         ? "Saved. If it's on the frame, it redraws at the next check-in. Press the button on the frame to update it now."
-        : "Sent! The frame will show it at its next check-in; press the button on the frame to show it now. To change it later, select it above and press Edit.", "ok");
+        : "Sent! The frame will show it at its next check-in; press the button on the frame to show it now. To change it later, select it above and press Edit.")
+        + alsoNote(targets, failedIds), failedIds.size ? "err" : "ok");
       clearEditor();
     }
   } catch (err) {
@@ -1688,6 +1791,9 @@ async function sendBatch() {
   busySending = true;
   $("editor").classList.add("sending");
   let sent = 0, failed = 0, started = 0;
+  const targets = await alsoTargets();
+  const ready = targets.filter((t) => !t.failed);
+  const failedIds = new Set(targets.filter((t) => t.failed).map((t) => t.id));
   // While one photo uploads, the next is dithered: the two biggest waits overlap. Uploads still
   // go one at a time, in order, so the first one is the one that goes up next.
   let inflight = null;
@@ -1708,9 +1814,13 @@ async function sendBatch() {
     for (const [n, i] of order.entries()) {
       msg(`${editing ? "Saving" : "Sending"} ${n + 1} of ${order.length}…`);
       if (!(await select(i))) { failed++; continue; }
-      const req = await prepareUpload(started++ === 0 ? "next" : "rotation");
+      const queue = started++ === 0 ? "next" : "rotation";
+      const req = await prepareUpload(queue);
+      const extras = [];
+      for (const t of ready) extras.push(await prepareFor(t, queue));
       await settle();
-      inflight = send(req);
+      inflight = Promise.all([send(req), ...extras.map(async (x) => (await send(x)) || failedIds.add(x.target.id))])
+        .then(([ok]) => ok);
     }
     await settle();
   } finally {
@@ -1719,7 +1829,8 @@ async function sendBatch() {
   }
   const verb = editing ? "Saved" : "Sent";
   msg(`${verb} ${plural(sent, editing ? "picture" : "photo")}` + (failed ? `; ${failed} couldn't be opened or sent.` : ".") +
-    (sent ? " They reach the frame at its next check-in; press the button on the frame to update it now." : ""), failed ? "err" : "ok");
+    (sent ? " They reach the frame at its next check-in; press the button on the frame to update it now." : "") +
+    alsoNote(targets, failedIds), failed || failedIds.size ? "err" : "ok");
   if (!failed) clearEditor();
 }
 

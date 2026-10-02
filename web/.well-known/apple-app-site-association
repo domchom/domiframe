@@ -1,0 +1,12 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["2LY5UM4K8T.art.domiframe.app"],
+        "components": [
+          { "/": "/f/*", "comment": "Frame invite links: /f/<id>#k=<code> opens the frame in the app" }
+        ]
+      }
+    ]
+  }
+}

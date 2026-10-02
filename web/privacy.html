@@ -39,6 +39,7 @@
         <li><b>About each frame:</b> its ID, the name it was given when it was set up, its screen size and how it hangs, and its settings (how often it changes picture and checks in, shuffle, quiet hours and their time zone, which folder it shows).</li>
         <li><b>About each picture:</b> when it was sent, its place in the queue, which folder it's in, whether the frame has shown it, a day it should show on if one is set, and when it was removed. The picture and its names stay encrypted.</li>
         <li><b>From the frame when it checks in:</b> the time, its battery voltage, its firmware version and screen size. Only the latest check-in is kept.</li>
+        <li><b>If you turn on alerts in the iPhone app:</b> a push token from Apple for your phone, kept with that frame so we can tell you when it's late or its battery is low. It's deleted when you turn alerts off, forget the frame, or the frame gets a new code.</li>
         <li><b>Keys:</b> a one-way fingerprint (SHA-256 hash) of the frame's access token and of its device key, so the server can check them without storing them.</li>
       </ul>
       <p>DomiFrame's own code doesn't record IP addresses, devices or browsing.</p>
@@ -48,6 +49,7 @@
         <li><b>Netlify</b> hosts the website and the server, and stores the data above. Like any web host, it handles your IP address and basic request details to deliver pages and may keep them in logs for a short time. See <a href="https://www.netlify.com/privacy/">Netlify's privacy policy</a>.</li>
         <li><b>Google Fonts</b>: the website loads its typefaces from Google, so your browser contacts Google when you open a page. See <a href="https://policies.google.com/privacy">Google's privacy policy</a>. The app doesn't use Google Fonts.</li>
         <li><b>Art Institute of Chicago</b>: in the app, Add Art shows public-domain paintings straight from the museum's image server, so the app contacts artic.edu when you open it. Nothing about you or your frames is sent. See the <a href="https://www.artic.edu/terms/privacy-policy">museum's privacy policy</a>.</li>
+        <li><b>Apple</b>: if you turn on alerts in the app, they're delivered by Apple's push notification service, which gets the alert's text (the frame's name and what's wrong) and your phone's push token. See <a href="https://www.apple.com/legal/privacy/">Apple's privacy policy</a>.</li>
       </ul>
       <p>No other service receives anything.</p>
 
