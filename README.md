@@ -17,7 +17,7 @@ Frame (wakes on schedule or KEY1) ──GET + ETag────────┘
    Every reply says how long to sleep (X-Sleep-Minutes)
 ```
 
-Each frame keeps up to 200 pictures, optionally sorted into folders; the frame cycles through one folder or all of them, in order or shuffled. New ones go up at the next check-in; any picture can be put up next on demand, or set to show only on a day (a birthday, every year); otherwise the frame rotates through them on a schedule (every hour, 3/6/12 hours, day, 3 days, week, or only when something new arrives). The server also decides when the frame wakes next: the check-in interval, quiet hours overnight, and fewer check-ins when the battery is low. Removed pictures stay in Recently removed for 30 days, so they can be put back. All of this is set per frame on the upload or admin page, with no reflashing.
+Each frame keeps up to 200 pictures, optionally sorted into folders; the frame cycles through one folder or all of them, in order or shuffled. New ones go up at the next check-in; any picture can be put up next on demand, or set to show only on a day (a birthday, every year); otherwise the frame rotates through them on a schedule (every hour, 3/6/12 hours, day, 3 days, week, or only when something new arrives). The server also decides when the frame wakes next: the check-in interval, quiet hours overnight, and fewer check-ins when the battery is low. When a check-in doesn't get through (no Wi-Fi, server down), the frame retries at its usual interval (`X-Retry-Minutes`), waiting twice as long after each failure in a row, up to 12 hours. When the battery is all but empty, the frame stops checking in and leaves its picture up (e-paper needs no power to keep it); it starts again once it's charged. Removed pictures stay in Recently removed for 30 days, so they can be put back. All of this is set per frame on the upload or admin page, with no reflashing.
 
 ## Repo layout
 
@@ -43,7 +43,7 @@ Each frame keeps up to 200 pictures, optionally sorted into folders; the frame c
 | `POST /api/admin/frames/:id/keys` `{key: "device"}` | admin | Replace the device key (old one stops working), shown once |
 | `PUT /api/admin/frames/:id/settings` | admin | Settings other than the folder, e.g. `orientation` |
 | `POST /api/frames/:id/code` `{hash}` | `X-Device-Key` | The frame registers a new code (SHA-256 of the token derived from it); puts the frame's pictures aside for 30 days, or brings them back if it's the code from before |
-| `GET /api/frames/:id/image` | `X-Device-Key` | Frame download, sealed (`ETag` / `304`, `204` if empty), always with `X-Sleep-Minutes`, and `X-Fw-Update` etc. when newer firmware is out |
+| `GET /api/frames/:id/image` | `X-Device-Key` | Frame download, sealed (`ETag` / `304`, `204` if empty), always with `X-Sleep-Minutes` and `X-Retry-Minutes`, and `X-Fw-Update` etc. when newer firmware is out |
 | `POST /api/frames/:id/image` | upload key | Add a picture: packed image, preview PNG, and optionally `thumb` JPEG, original JPEG, `edits`, `from`, `album`, `queue` |
 | `GET /api/frames/:id/info` | upload key | Name, check-ins, battery, settings, picture queue |
 | `GET /api/frames/:id/preview` | upload key | PNG of the picture on the frame now |

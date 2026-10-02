@@ -41,6 +41,15 @@
         <p class="eyebrow">Now showing on</p>
         <h2 id="frame-name">Your frame</h2>
         <p class="meta" id="frame-status">Loading…</p>
+        <form class="code-gone" id="code-gone" novalidate hidden>
+          <p id="gone-code-line">The code saved here: <b class="code-value" id="gone-code"></b></p>
+          <p class="tip">The frame has probably made a new code. Hold KEY1 on the frame while pressing reset to see it, and enter it below. If the frame made a new code by mistake, type the code above into its setup instead (hold KEY3 and press reset): within 30 days, its pictures come back.</p>
+          <label class="slider">New frame code
+            <input id="new-code" class="text code-input" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX">
+          </label>
+          <button class="primary">Open frame</button>
+          <p id="gone-msg" class="msg err" role="status"></p>
+        </form>
         <button type="button" class="chip invite" id="invite" hidden>Invite someone</button>
       </div>
       <div class="now">
@@ -335,6 +344,7 @@
           <p class="muted small">Go to <b>domiframe.art</b>, choose <b>My frame</b>, and enter:</p>
           <dl class="spec"><div><dt>Frame ID</dt><dd id="access-id"></dd></div><div><dt>Frame code</dt><dd id="access-code"></dd></div></dl>
           <p class="tip">Anyone with these can add and remove pictures, so share them like a house key.</p>
+          <p class="tip" id="old-code" hidden>The frame's code before this one, <b class="code-value" id="old-code-value"></b>, is kept here until <span id="old-code-until"></span>. To get the pictures from then back, type it into the frame's setup (hold KEY3 and press reset).</p>
         </div>
       </details>
     </section>

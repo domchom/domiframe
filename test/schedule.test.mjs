@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  choosePicture, nextWakeMinutes, addPicture, removePicture, mergeSettings, inQuietHours,
+  choosePicture, nextWakeMinutes, retryMinutes, addPicture, removePicture, mergeSettings, inQuietHours,
   emptyState, MAX_PICTURES, replacePicture, movePictures, deleteAlbum, addAlbum,
   removePictures, restorePictures, emptyTrash, setPictureDay, isPictureDay, pool, TRASH_DAYS, MAX_TRASH,
 } from "../netlify/lib/schedule.mjs";
@@ -68,6 +68,14 @@ test("wake time: check interval, next rotation, low battery, quiet hours", () =>
   const quiet = { checkMinutes: 60, quiet: true, quietStart: 23, quietEnd: 7, tz: "UTC" };
   assert.equal(nextWakeMinutes(one, quiet, Date.parse("2026-06-01T22:30:00Z")), 8.5 * 60);
   assert.equal(nextWakeMinutes(one, quiet, Date.parse("2026-06-01T12:00:00Z")), 60);
+});
+
+test("a failed check-in retries at the usual interval, not the next wake's", () => {
+  // what the frame waits after a check-in that doesn't get through: never the quiet-hours sleep
+  const quiet = { checkMinutes: 30, quiet: true, quietStart: 23, quietEnd: 7, tz: "UTC" };
+  assert.equal(retryMinutes(quiet), 30);
+  assert.equal(retryMinutes({}), 60, "the default interval");
+  assert.equal(retryMinutes(quiet, 3400), 240, "a low battery still stretches it");
 });
 
 test("quiet hours respect the frame's time zone", () => {

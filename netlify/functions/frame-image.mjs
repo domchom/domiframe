@@ -4,7 +4,8 @@
 //                      X-Panel (7.3|13.3: the screen the firmware was built for),
 //                      X-Fw-Env (ee04|ee02-13in3: which firmware build it runs)
 //        -> 200 sealed packed image | 304 unchanged | 204 nothing uploaded yet
-//        Every reply carries X-Sleep-Minutes (when to check in next) and X-Orientation, and
+//        Every reply carries X-Sleep-Minutes (when to check in next), X-Retry-Minutes (the usual
+//        interval, for when a check-in fails) and X-Orientation, and
 //        when newer firmware is out: X-Fw-Update (version), X-Fw-Url, X-Fw-Size and X-Fw-Sig
 //        (see lib/firmware.mjs).
 //   POST (upload page) Authorization: Bearer <token derived from the frame code>, multipart form,
@@ -23,7 +24,7 @@ import {
   purgeOldCode,
 } from "../lib/common.mjs";
 import { firmwareHeaders } from "../lib/firmware.mjs";
-import { choosePicture, nextWakeMinutes, addPicture, mergeSettings, fitsPanel } from "../lib/schedule.mjs";
+import { choosePicture, nextWakeMinutes, retryMinutes, addPicture, mergeSettings, fitsPanel } from "../lib/schedule.mjs";
 
 export const config = { path: "/api/frames/:id/image" };
 
@@ -79,6 +80,7 @@ async function deviceFetch(req, id, frame) {
   // bytes, and knows its own screen): it takes the size chosen when the frame was created
   const sleep = {
     "x-sleep-minutes": String(sleepMinutes),
+    "x-retry-minutes": String(retryMinutes(frame.settings, mv)),
     "x-orientation": frame.settings?.orientation || "landscape",
     "x-panel": frame.settings?.panel || "7.3",
     ...firmwareHeaders(req.headers.get("x-fw-env"), req.headers.get("x-fw")),

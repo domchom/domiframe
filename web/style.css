@@ -721,3 +721,8 @@ dialog.ask::backdrop {
 .ask-buttons .ask-ok { background: var(--ink); color: var(--surface); border-color: var(--ink); }
 .ask-buttons .ask-ok.danger { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .ask-buttons .ask-ok:disabled { opacity: .35; cursor: not-allowed; }
+
+/* Upload page: a frame code that stopped working, and the code a frame had before */
+.code-gone { margin-top: 14px; max-width: 520px; }
+.code-gone p { margin: 0 0 10px; }
+.code-value { font-family: var(--mono); letter-spacing: .08em; white-space: nowrap; }

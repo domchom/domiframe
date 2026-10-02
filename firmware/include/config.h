@@ -2,7 +2,7 @@
 
 // ---- Server ---------------------------------------------------------------
 #define SERVER_BASE "https://domiframe.art"
-#define FW_VERSION "0.7.0"  // tools/release.py publishes it; raise it for every release
+#define FW_VERSION "0.8.0"  // tools/release.py publishes it; raise it for every release
 
 // Which build this is, so updates over Wi-Fi only ever bring the same build (platformio.ini envs)
 #if defined(DOMIFRAME_PANEL_13IN3)
@@ -26,6 +26,18 @@
 #define SLEEP_MINUTES 60
 #define MIN_SLEEP_MINUTES 5
 #define MAX_SLEEP_MINUTES (7 * 24 * 60)
+// After check-ins that don't get through (no Wi-Fi, or the server doesn't answer), the frame
+// waits twice as long after each one in a row, up to this, so a frame whose network is down
+// doesn't spend its battery on the radio every hour.
+#define MAX_OFFLINE_SLEEP_MINUTES (12 * 60)
+
+// An empty battery (millivolts, read before Wi-Fi is on): the frame stops checking in, keeping its
+// picture up, and looks again every FLAT_CHECK_MINUTES (without Wi-Fi) until the battery is back
+// over RESUME_MV, from charging. The server's own low-battery slowdown starts well
+// before this (LOW_BATTERY_MV in netlify/lib/schedule.mjs).
+#define FLAT_MV 3350
+#define RESUME_MV 3700
+#define FLAT_CHECK_MINUTES (6 * 60)
 
 // ---- XIAO ePaper Display Board EE04 (XIAO ESP32-S3 Plus) --------------------
 // From Seeed_GFX User_Setups/EPaper_Board_Pins_Setups.h (USE_XIAO_EPAPER_DISPLAY_BOARD_EE04)

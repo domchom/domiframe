@@ -1,7 +1,7 @@
 import { sizeFor, toPanelOrder, panelOf, DEFAULTS, ditherWithPreview, pack, indicesToRGBA, PALETTE } from "./dither.js";
 import { ask, tell } from "./dialog.js";
 import { ago, until, batteryPct, LOW_BATTERY_PCT, rotateLabel, checkLabel, hourLabel } from "./format.js";
-import { rememberFrame, rememberedFrames, isFrameCode, normalizeCode, frameLink } from "./code.js";
+import { rememberFrame, rememberedFrames, isFrameCode, normalizeCode, frameLink, saveCode, oldCode } from "./code.js";
 import { frameKeys, seal, unseal, sealText, unsealText } from "./seal.js";
 import { dateTaken } from "./exif.js";
 
@@ -16,7 +16,7 @@ const hashParams = new URLSearchParams(location.hash.slice(1));
 let uploadKey = hashParams.get("k");
 try {
   if (uploadKey) {
-    localStorage.setItem(storageKey, (uploadKey = normalizeCode(uploadKey)));
+    saveCode(frameId, (uploadKey = normalizeCode(uploadKey)));
     history.replaceState(null, "", location.pathname); // saved: keep the code out of the address bar
   } else uploadKey = localStorage.getItem(storageKey);
 } catch { /* storage unavailable */ }
@@ -50,15 +50,32 @@ const api = (path, init = {}) =>
 /**
  * No frame code, or it doesn't open this frame (wrong code, a link from before frames made their
  * own codes, or the frame has made a new code since). Nothing can be sent, so both pickers go.
+ * The code stays saved: if the frame made a new one by mistake, typing this one back into the
+ * frame brings its pictures back. Not on a server hiccup (stale = false): the code may be fine.
  */
-function cantOpen(forget = true) {
-  $("frame-status").textContent = "This frame's code is missing or no longer works. " +
-    "Hold KEY1 on the frame while pressing reset to see its code, then enter it under My frame on the home page.";
+function cantOpen(stale = true) {
+  $("frame-status").textContent = stale
+    ? "This frame's code is missing or no longer works."
+    : "Couldn't reach the frame. Try again in a moment.";
   $("file").disabled = $("folder").disabled = true;
   for (const p of document.querySelectorAll(".picker")) p.classList.add("off");
-  // So My frame asks for the code again (not on a server hiccup: the code may be fine)
-  if (forget) try { localStorage.removeItem(storageKey); } catch {}
+  if (!stale || !frameId) return;
+  $("code-gone").hidden = false;
+  $("gone-code-line").hidden = !isFrameCode(uploadKey);
+  $("gone-code").textContent = uploadKey || "";
 }
+
+// A new code for this frame, typed in where the old one stopped working
+$("code-gone").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const code = normalizeCode($("new-code").value);
+  if (!isFrameCode(code)) {
+    $("gone-msg").textContent = "A frame code is 16 letters and numbers, like K7PX-92QD-M4TR-8WZN.";
+    return;
+  }
+  saveCode(frameId, code); // the code that stopped working is kept as the old one
+  location.reload();
+});
 
 async function loadInfo() {
   if (frameId && isFrameCode(uploadKey) && !contentKey) {
@@ -77,6 +94,12 @@ async function loadInfo() {
   $("invite").hidden = false;
   $("access-id").textContent = frameId;
   $("access-code").textContent = uploadKey;
+  const old = oldCode(frameId);
+  $("old-code").hidden = !old;
+  if (old) {
+    $("old-code-value").textContent = old.code;
+    $("old-code-until").textContent = old.until.toLocaleDateString(undefined, { day: "numeric", month: "long" });
+  }
   $("frame-name").textContent = info.name || "Your frame";
   document.title = `${info.name || "Frame"} · DomiFrame`;
 

@@ -90,12 +90,18 @@ RTC_DATA_ATTR int32_t rtcChannel = 0;
 // doesn't drain the battery retrying at every check-in. Starts over for a newer version.
 RTC_DATA_ATTR uint8_t rtcUpdateFails = 0;
 RTC_DATA_ATTR char rtcUpdateFailedVersion[16] = "";
+// The frame's usual check-in interval (the server's X-Retry-Minutes), and how many check-ins in
+// a row haven't got through: when the next one fails, it waits that long, doubled for each.
+RTC_DATA_ATTR uint32_t rtcRetryMinutes = 0;
+RTC_DATA_ATTR uint8_t rtcFailedCheckIns = 0;
 
 Preferences prefs;
 String frameId, deviceKey, etag;
 String frameCode;          // XXXX-XXXX-XXXX-XXXX, made here, never sent anywhere
 bool codePending = false;  // made but not yet registered with the server
-uint32_t sleepMinutes = SLEEP_MINUTES;  // replaced by the server's X-Sleep-Minutes
+// How long to sleep: the server's X-Sleep-Minutes after a check-in, otherwise the usual interval
+uint32_t sleepMinutes = SLEEP_MINUTES;
+bool checkedIn = false;  // the server answered this wake's check-in
 // How the frame hangs: "landscape" or "portrait". Chosen in the setup portal (sent to the server
 // until it confirms), otherwise whatever the server says (set on the website). Pictures arrive
 // already turned for it; this only decides which way up our own messages are drawn.
@@ -501,7 +507,11 @@ int registerCode() {
   int code = http.POST("{\"hash\":\"" + accessTokenHash() + "\"}");
   http.end();
   Serial.printf("POST %s -> %d\n", url.c_str(), code);
-  if (code == 200) saveCode(frameCode, false);
+  if (code == 200) {
+    saveCode(frameCode, false);
+    checkedIn = true;
+    rtcFailedCheckIns = 0;
+  }
   return code;
 }
 
@@ -632,16 +642,20 @@ bool fetchAndDraw(int batteryMv) {
   http.addHeader("X-Panel", PANEL_ID);  // the server makes pictures this size
   if (etag.length()) http.addHeader("If-None-Match", etag);
   if (orientationPending) http.addHeader("X-Set-Orientation", orientation);
-  const char* keep[] = {"ETag", "X-Sleep-Minutes", "X-Orientation", "X-Fw-Update", "X-Fw-Url", "X-Fw-Size", "X-Fw-Sig"};
-  http.collectHeaders(keep, 7);
+  const char* keep[] = {"ETag", "X-Sleep-Minutes", "X-Retry-Minutes", "X-Orientation",
+                        "X-Fw-Update", "X-Fw-Url", "X-Fw-Size", "X-Fw-Sig"};
+  http.collectHeaders(keep, 8);
 
   int code = http.GET();
   Serial.printf("GET %s -> %d\n", url.c_str(), code);
 
-  long mins = http.header("X-Sleep-Minutes").toInt();  // 0 if missing
-  if (mins >= MIN_SLEEP_MINUTES && mins <= MAX_SLEEP_MINUTES) sleepMinutes = (uint32_t)mins;
-
   if (code == 200 || code == 204 || code == 304) {
+    checkedIn = true;
+    rtcFailedCheckIns = 0;
+    long mins = http.header("X-Sleep-Minutes").toInt();  // 0 if missing
+    if (mins >= MIN_SLEEP_MINUTES && mins <= MAX_SLEEP_MINUTES) sleepMinutes = (uint32_t)mins;
+    long retry = http.header("X-Retry-Minutes").toInt();  // missing from older servers
+    if (retry >= MIN_SLEEP_MINUTES && retry <= MAX_SLEEP_MINUTES) rtcRetryMinutes = (uint32_t)retry;
     // This firmware got through to the server: keep it (after an update, an image that can't
     // would be rolled back to the one before, where the bootloader supports that)
     esp_ota_mark_app_valid_cancel_rollback();
@@ -707,6 +721,13 @@ bool fetchAndDraw(int batteryMv) {
     // Short read, or not sealed with our code (e.g. uploaded just before a new code)
     Serial.printf(got == SEALED_BYTES ? "couldn't open the picture\n" : "short read %u\n", (unsigned)got);
     free(buf);
+    if (got == SEALED_BYTES) {
+      // It arrived whole and won't open, and downloading it again won't change that: keep its
+      // ETag so the next check-ins get a 304 until the server moves on to another picture,
+      // instead of the whole picture again at every wake. A short read is tried again.
+      etag = newEtag;
+      saveString("etag", etag);
+    }
     return false;
   }
 
@@ -825,6 +846,43 @@ void installUpdate(int batteryMv) {
   ESP.restart();
 }
 
+// The usual check-in interval: the server's, from the last check-in that got through
+uint32_t usualMinutes() { return rtcRetryMinutes ? rtcRetryMinutes : SLEEP_MINUTES; }
+
+// After a check-in that didn't get through (no Wi-Fi, the server didn't answer or refused): the
+// usual interval the first time, then twice as long for each one in a row, up to
+// MAX_OFFLINE_SLEEP_MINUTES (or the usual interval, if that's longer). It can't keep to quiet
+// hours, which only the server knows, but it soon wakes rarely enough that they hardly matter.
+void sleepAfterFailedCheckIn() {
+  uint32_t usual = usualMinutes();
+  uint32_t longest = max(usual, (uint32_t)MAX_OFFLINE_SLEEP_MINUTES);
+  uint32_t minutes = usual << min<uint8_t>(rtcFailedCheckIns, 8);
+  sleepMinutes = min(minutes, longest);
+  if (rtcFailedCheckIns < 255) rtcFailedCheckIns++;
+}
+
+// When the battery is all but empty the frame stops checking in, leaving its picture up: e-paper
+// keeps it with no power at all. Wi-Fi and a refresh could brown it out, and running a LiPo flat
+// wears it, so until it's been charged it only wakes every few hours to read the battery, without
+// Wi-Fi. Owners see the battery from the last check-in on the website and in the app. Returns
+// true while it's flat.
+bool batteryFlat(int mv) {
+  prefs.begin("domiframe", true);
+  bool flat = prefs.getBool("flat", false);
+  prefs.end();
+
+  bool onUsb = mv < 1000;  // no battery connected
+  bool nowFlat = !onUsb && mv < (flat ? RESUME_MV : FLAT_MV);  // charged well up before it counts
+  if (nowFlat != flat) {
+    Serial.printf(nowFlat ? "battery empty (%d mV)\n" : "battery back to %d mV\n", mv);
+    prefs.begin("domiframe", false);
+    prefs.putBool("flat", nowFlat);  // kept in flash: a brownout restart forgets RTC memory
+    prefs.end();
+  }
+  if (nowFlat) sleepMinutes = FLAT_CHECK_MINUTES;
+  return nowFlat;
+}
+
 void goToSleep() {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
@@ -853,6 +911,13 @@ void setup() {
   pinMode(BTN_REFRESH, INPUT_PULLUP);
 
   loadSettings();
+  sleepMinutes = usualMinutes();  // until the server says otherwise
+
+  // Before Wi-Fi: the radio pulls the battery's voltage down while it's on, and the reading with it
+  int mv = readBatteryMv();
+  Serial.printf("frame=%s battery=%dmV etag=%s\n", frameId.c_str(), mv, etag.c_str());
+  if (batteryFlat(mv)) goToSleep();
+
   bool wantSetup = frameId.isEmpty() || deviceKey.isEmpty() || digitalRead(BTN_SETUP) == LOW;
   // KEY1 held while pressing reset (not a KEY1 wake from sleep): show the frame code again
   bool wantCode = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED && digitalRead(BTN_REFRESH) == LOW;
@@ -867,17 +932,16 @@ void setup() {
   if (!online) {
     if (wantSetup) showMessage("Setup timed out", "Press reset to try again.");
     // Otherwise keep the current picture and retry at the next wake.
+    sleepAfterFailedCheckIn();
     goToSleep();
   }
-
-  int mv = readBatteryMv();
-  Serial.printf("frame=%s battery=%dmV etag=%s\n", frameId.c_str(), mv, etag.c_str());
 
   if (frameCode.isEmpty()) newFrameCode();  // first setup, or asked for in the portal
   if (codePending) {
     int code = registerCode();
     if (code == 200) showCodeScreen();
     else if (code == 401 || code == 404) showMessage("Frame not registered", "Hold KEY3 and press reset", "to re-enter the frame ID and key.");
+    if (!checkedIn) sleepAfterFailedCheckIn();
     goToSleep();  // on a network error, try again next wake (pictures can't arrive before)
   }
   if (wantCode) {
@@ -888,6 +952,7 @@ void setup() {
   bool drew = fetchAndDraw(mv);
   if (!drew && wantSetup) showCodeScreen();  // what someone needs to send the first picture
   if (offer.version.length()) installUpdate(mv);  // restarts into the new firmware if it works
+  if (!checkedIn) sleepAfterFailedCheckIn();
   goToSleep();
 }
 

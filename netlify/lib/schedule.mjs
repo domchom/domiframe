@@ -207,6 +207,19 @@ export function choosePicture(inState, settings, now, rng = Math.random) {
   }
 }
 
+/** A low battery wins over the schedule: fewer check-ins, slower rotation. */
+const lowBatteryMinutes = (batteryMv) => (batteryMv && batteryMv < LOW_BATTERY_MV ? 240 : 0);
+
+/**
+ * The frame's usual check-in interval: what it waits after a check-in that doesn't get through
+ * (doubling for each one in a row). Unlike nextWakeMinutes, never stretched to skip quiet hours
+ * or shortened for the next scheduled change, which only hold for the next wake.
+ */
+export function retryMinutes(settings, batteryMv) {
+  const s = { ...DEFAULT_SETTINGS, ...settings };
+  return Math.max(s.checkMinutes, lowBatteryMinutes(batteryMv));
+}
+
 /** Minutes the frame should sleep after a check-in at `now`. */
 export function nextWakeMinutes(inState, settings, now, batteryMv) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
@@ -219,8 +232,7 @@ export function nextWakeMinutes(inState, settings, now, batteryMv) {
     minutes = Math.min(minutes, Math.max(5, Math.ceil(until)));
   }
 
-  // A low battery wins over the schedule: fewer check-ins, slower rotation.
-  if (batteryMv && batteryMv < LOW_BATTERY_MV) minutes = Math.max(minutes, 240);
+  minutes = Math.max(minutes, lowBatteryMinutes(batteryMv));
 
   // Skip quiet hours: step forward until the wake time is outside them.
   let wake = now + minutes * 60e3;

@@ -56,7 +56,35 @@ export function forgetFrame(id) {
   try {
     localStorage.setItem(LIST, JSON.stringify(rememberedFrames().filter((f) => f.id !== id)));
     localStorage.removeItem(`domiframe:${id}`);
+    localStorage.removeItem(`domiframe:${id}:old`);
   } catch {}
+}
+
+// When a frame gets a new code, the server keeps the pictures sealed with the old one for
+// OLD_CODE_DAYS (netlify/lib/common.mjs): typing the old code back into the frame's setup
+// brings them back. So the old code is kept here that long too, instead of being overwritten.
+export const OLD_CODE_DAYS = 30;
+
+/** Save a frame's code; a different code saved before is kept as its old code. */
+export function saveCode(id, code) {
+  try {
+    const before = localStorage.getItem(`domiframe:${id}`);
+    if (before && before !== code && isFrameCode(before)) {
+      localStorage.setItem(`domiframe:${id}:old`, JSON.stringify({ code: before, at: new Date().toISOString() }));
+    }
+    localStorage.setItem(`domiframe:${id}`, code);
+  } catch {}
+}
+
+/** The code this frame had before, while it can still bring pictures back: { code, until } or null. */
+export function oldCode(id) {
+  try {
+    const old = JSON.parse(localStorage.getItem(`domiframe:${id}:old`) || "null");
+    const until = old && Date.parse(old.at) + OLD_CODE_DAYS * 864e5;
+    if (old && isFrameCode(old.code) && until > Date.now()) return { code: old.code, until: new Date(until) };
+    localStorage.removeItem(`domiframe:${id}:old`);
+  } catch {}
+  return null;
 }
 
 export const savedKey = (id) => {

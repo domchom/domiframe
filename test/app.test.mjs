@@ -181,6 +181,7 @@ test("full flow: create frame, frame makes its code, queue pictures, rotate, set
   let res = await f.dev();
   assert.equal(res.status, 204);
   assert.equal(res.headers.get("x-sleep-minutes"), "60");
+  assert.equal(res.headers.get("x-retry-minutes"), "60");
   assert.equal(res.headers.get("x-orientation"), "landscape");
   // the frame can say how it hangs; the server remembers it
   res = await f.dev({ "x-set-orientation": "portrait" });
