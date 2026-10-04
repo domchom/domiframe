@@ -315,24 +315,51 @@ void drawCard(int x, int y, int w, int h) {
   inkRect(x + 3, y + 3, w - 6, h - 6, INK_WHITE);
 }
 
-// The frame code's characters, CODE_SCALE units a dot and CODE_BOLD wider, so the strokes are
-// heavier than the gaps; digits in blue, letters in black, each drawn to differ from its
-// look-alikes (pixel_font.h). Four to a card.
-static const int CODE_SCALE = 6, CODE_BOLD = 2, CARD_PAD = 12;
-static const int CODE_CARD_W = 4 * PF_CODE_W * CODE_SCALE + 3 * CODE_SCALE + CODE_BOLD + 2 * CARD_PAD;
-static const int CODE_CARD_H = PF_CODE_H * CODE_SCALE + 2 * CARD_PAD;
-void drawCodeGroup(const String& group, int x, int top) {
-  for (int i = 0; i < (int)group.length(); i++) {
-    char ch = group[i];
-    const PfCodeGlyph* g = nullptr;
-    for (const PfCodeGlyph& k : PF_CODE) if (k.c == ch) g = &k;
-    if (!g) continue;
-    int ink = isdigit((unsigned char)ch) ? INK_BLUE : INK_BLACK;
-    int gx = x + i * (PF_CODE_W + 1) * CODE_SCALE;
-    for (int r = 0; r < PF_CODE_H; r++)
-      for (int c = 0; c < PF_CODE_W; c++)
-        if (g->rows[r][c] == '#') inkRect(gx + c * CODE_SCALE, top + r * CODE_SCALE, CODE_SCALE + CODE_BOLD, CODE_SCALE, ink);
+// The frame code in one card, read like a line of text: groups of four apart, with a red dash
+// between them; on one line at the biggest size that fits maxW, or else on two (the dash at the
+// end of the first). Digits blue, letters black, each character drawn to differ from its
+// look-alikes (pixel_font.h), PF_CODE_W x PF_CODE_H dots of sc units, CODE_BOLD wider so the
+// strokes are heavier than the gaps. web/sim.js codeCard draws the same. Returns its height.
+static const int CODE_BOLD = 2, CARD_PAD = 14;
+static int groupW(int sc) { return 4 * PF_CODE_W * sc + 3 * sc + CODE_BOLD; }
+static int dashW(int sc) { return 4 * sc + 2 * 2 * sc; }
+static int lineW(int sc, int n) { return n * groupW(sc) + (n - 1) * dashW(sc) + 2 * CARD_PAD; }
+
+void drawCodeChar(char ch, int x, int y, int sc) {
+  const PfCodeGlyph* g = nullptr;
+  for (const PfCodeGlyph& k : PF_CODE) if (k.c == ch) g = &k;
+  if (!g) return;
+  int ink = isdigit((unsigned char)ch) ? INK_BLUE : INK_BLACK;
+  for (int r = 0; r < PF_CODE_H; r++)
+    for (int c = 0; c < PF_CODE_W; c++)
+      if (g->rows[r][c] == '#') inkRect(x + c * sc, y + r * sc, sc + CODE_BOLD, sc, ink);
+}
+
+int drawCodeCard(const String& code, int x, int y, int maxW) {
+  String groups[4];
+  String rest = code;
+  for (int i = 0; i < 4; i++) {
+    int dash = rest.indexOf('-');
+    groups[i] = dash < 0 ? rest : rest.substring(0, dash);
+    rest = dash < 0 ? "" : rest.substring(dash + 1);
   }
+  int sc = 0, perLine = 4;
+  for (int k = 6; k >= 4 && !sc; k--) if (lineW(k, 4) <= maxW) sc = k;
+  if (!sc) {
+    perLine = 2;
+    for (int k = 6; k >= 3 && !sc; k--) if (lineW(k, 2) + dashW(k) <= maxW) sc = k;
+    if (!sc) sc = 3;
+  }
+  int lines = 4 / perLine;
+  int cw = lineW(sc, perLine) + (lines > 1 ? dashW(sc) : 0), lineH = PF_CODE_H * sc, gap = 3 * sc;
+  int ch = lines * lineH + (lines - 1) * gap + 2 * CARD_PAD;
+  drawCard(x, y, cw, ch);
+  for (int n = 0; n < 4; n++) {
+    int gx = x + CARD_PAD + (n % perLine) * (groupW(sc) + dashW(sc)), gy = y + CARD_PAD + (n / perLine) * (lineH + gap);
+    for (int i = 0; i < (int)groups[n].length(); i++) drawCodeChar(groups[n][i], gx + i * (PF_CODE_W + 1) * sc, gy, sc);
+    if (n < 3) inkRect(gx + groupW(sc) + 2 * sc, gy + 3 * sc, 4 * sc, sc, INK_RED);  // the dash
+  }
+  return ch;
 }
 
 // Two lines at the bottom, under a thin rule; returns where the rule is
@@ -502,9 +529,9 @@ bool unsealPicture(const uint8_t* sealed, uint8_t* out) {
   return rc == 0;
 }
 
-// The frame code in four cards (digits blue, letters black), the frame ID under them, and a QR
-// code as a card: beside them on a wide screen, under them on a tall one. web/sim.js showCode
-// draws the same.
+// Laid out like a ticket: what to type on the left, in the order it's typed (the frame ID, then
+// the code in one card that reads like a line of text), and a QR code card on the right; on a
+// tall screen, the QR card goes underneath. web/sim.js showCode draws the same.
 void showCodeScreen() {
   // The QR code opens the frame's page with the code filled in. It's after the #, which
   // browsers never send to the server.
@@ -513,35 +540,31 @@ void showCodeScreen() {
   drawScreen([&] {
     int w = screenW(), h = screenH();
     drawHeader(w);
-    int foot = drawFooter(w, h, qr ? "Scan it with a phone's camera, or enter" : "Enter both at domiframe.art,",
-                          qr ? "the code and ID at domiframe.art." : "under My frame.");
-
-    inkText("FRAME CODE", MARGIN, HEAD + 36, &FreeMonoBold9pt7b, INK_RED);
-    int top = HEAD + 50;
-    String rest = frameCode;
-    for (int i = 0; i < 4; i++) {  // XXXX-XXXX-XXXX-XXXX: a card each
-      int dash = rest.indexOf('-');
-      String group = dash < 0 ? rest : rest.substring(0, dash);
-      rest = dash < 0 ? "" : rest.substring(dash + 1);
-      int x = MARGIN + (i % 2) * (CODE_CARD_W + 16), y = top + (i / 2) * (CODE_CARD_H + 14);
-      drawCard(x, y, CODE_CARD_W, CODE_CARD_H);
-      drawCodeGroup(group, x + CARD_PAD, y + CARD_PAD);
-    }
-    int y = top + 2 * CODE_CARD_H + 14;
-
     bool wide = w > h;
     int side = qr ? qrSide() : 0;
-    int room = (qr && wide ? w - MARGIN - side - 24 : w - MARGIN) - MARGIN;  // for the ID
-    inkText("FRAME ID", MARGIN, y += 36, &FreeMonoBold9pt7b, INK_RED);
+    int right = qr && wide ? w - MARGIN - side - CARD_SHADOW - 30 : w - MARGIN;  // the left column's edge
+    int room = right - MARGIN;
+
+    int y = HEAD + 40;
+    inkText("FRAME ID", MARGIN, y, &FreeMonoBold9pt7b, INK_RED);
     const GFXfont* idFont = &FreeMonoBold18pt7b;
     if (textWidth(frameId.c_str(), idFont) > room) idFont = &FreeMonoBold12pt7b;
     if (textWidth(frameId.c_str(), idFont) > room) idFont = &FreeMonoBold9pt7b;
-    inkText(frameId.c_str(), MARGIN, y += 34, idFont, INK_BLACK);
+    inkText(frameId.c_str(), MARGIN, y += 36, idFont, INK_BLACK);
+    inkText("FRAME CODE", MARGIN, y += 46, &FreeMonoBold9pt7b, INK_RED);
+    y += drawCodeCard(frameCode, MARGIN, y + 10, room - CARD_SHADOW) + 10;
 
     if (qr) {
-      int qtop = wide ? HEAD : y + 20;  // centered in the space left
-      drawQr(wide ? w - MARGIN - side - CARD_SHADOW : (w - side) / 2, qtop + (foot - qtop - side) / 2);
+      int qx = wide ? w - MARGIN - side - CARD_SHADOW : (w - side) / 2;
+      int qy = wide ? HEAD + 40 + 12 : y + 64;
+      inkText("SCAN TO OPEN", qx, qy - 12, &FreeMonoBold9pt7b, INK_RED);
+      drawQr(qx, qy);
+      if (!wide) y = qy + side;
     }
+    // How to use it, under everything on the left
+    int ly = max(y + 44, h - MARGIN - 36);
+    inkText(qr ? "Scan the QR code with a phone's camera," : "Enter the ID and code at domiframe.art,", MARGIN, ly, &FreeSans12pt7b, INK_BLACK);
+    inkText(qr ? "or enter the ID and code at domiframe.art." : "under My frame.", MARGIN, ly + 30, &FreeSans12pt7b, INK_BLACK);
   });
   etag = "";  // the picture comes back at the next wake
   saveString("etag", etag);

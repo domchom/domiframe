@@ -97,11 +97,11 @@ function showUploadLink(id) {
   if (!a.hidden) a.href = `/f/${id}#k=${frameCode(id)}`;
 }
 
-// The firmware's showCodeScreen(): the code in four cards (digits blue, letters black, each
-// character drawn to differ from its look-alikes), the frame ID under them, and a QR code that
-// opens the frame's page with the code filled in (after the #, so it's never sent to the server),
-// as a card beside them on a wide screen, under them on a tall one
-const showCode = (id) => screen(({ w, h, rect, text, width, header, footer, card, codeGroup }) => {
+// The firmware's showCodeScreen(), laid out like a ticket: what to type on the left, in the
+// order it's typed (the frame ID, then the code in one card that reads like a line of text), and
+// a QR code card on the right that opens the frame's page with both filled in (the code after
+// the #, so it's never sent to the server); on a tall screen, the QR card goes underneath.
+const showCode = (id) => screen(({ w, h, rect, text, width, header, card, codeCard }) => {
   const code = frameCode(id), qrText = `${location.origin}/f/${id}#k=${code}`;
   header();
   let qr = null;
@@ -110,30 +110,31 @@ const showCode = (id) => screen(({ w, h, rect, text, width, header, footer, card
     qr.addData(qrText);
     qr.make();
   }
-  const foot = footer(qr ? "Scan it with a phone's camera, or enter" : `Enter both at ${location.host},`,
-    qr ? `the code and ID at ${location.host}.` : "under My frame.");
-  text("FRAME CODE", MARGIN, HEAD + 36, MONO_9, 3);
-  const groups = code.split("-");
-  const top = HEAD + 50;
-  groups.forEach((g, i) => {
-    const x = MARGIN + (i % 2) * (CARD_W + 16), y = top + Math.floor(i / 2) * (CARD_H + 14);
-    card(x, y, CARD_W, CARD_H);
-    codeGroup(g, x + CARD_PAD, y + CARD_PAD);
-  });
-  let y = top + 2 * CARD_H + 14;
   const wide = w > h, n = qr ? qr.getModuleCount() : 0, side = qr ? (n + 8) * QR_MODULE + 6 : 0;
-  const room = (qr && wide ? w - MARGIN - side - 24 : w - MARGIN) - MARGIN;
-  text("FRAME ID", MARGIN, (y += 36), MONO_9, 3);
+  const right = qr && wide ? w - MARGIN - side - CARD_SHADOW - 30 : w - MARGIN; // the left column's edge
+  const room = right - MARGIN;
+  let y = HEAD + 40;
+  text("FRAME ID", MARGIN, y, MONO_9, 3);
   const idFont = [MONO_18, MONO_12, MONO_9].find((f) => width(id, f) <= room) || MONO_9;
-  text(id, MARGIN, (y += 34), idFont, 0);
+  text(id, MARGIN, (y += 36), idFont, 0);
+  text("FRAME CODE", MARGIN, (y += 46), MONO_9, 3);
+  y += codeCard(code, MARGIN, y + 10, room - CARD_SHADOW) + 10;
   if (qr) {
-    const qtop = wide ? HEAD : y + 20;
-    const x0 = wide ? w - MARGIN - side - CARD_SHADOW : Math.floor((w - side) / 2), y0 = qtop + Math.floor((foot - qtop - side) / 2);
-    card(x0, y0, side, side);
+    const qx = wide ? w - MARGIN - side - CARD_SHADOW : Math.floor((w - side) / 2);
+    const qy = wide ? HEAD + 40 + 12 : y + 64;
+    text("SCAN TO OPEN", qx, qy - 12, MONO_9, 3);
+    card(qx, qy, side, side);
     for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
-      if (qr.isDark(r, c)) rect(x0 + 3 + (c + 4) * QR_MODULE, y0 + 3 + (r + 4) * QR_MODULE, QR_MODULE, QR_MODULE, 0);
+      if (qr.isDark(r, c)) rect(qx + 3 + (c + 4) * QR_MODULE, qy + 3 + (r + 4) * QR_MODULE, QR_MODULE, QR_MODULE, 0);
     }
+    if (!wide) y = qy + side;
   }
+  // How to use it, under everything on the left
+  const at = location.host;
+  const lines = qr ? [`Scan the QR code with a phone's camera,`, `or enter the ID and code at ${at}.`]
+    : [`Enter the ID and code at ${at},`, "under My frame."];
+  const ly = Math.max(y + 44, h - MARGIN - 36);
+  lines.forEach((l, i) => text(l, MARGIN, ly + i * 30, SANS_12, 0));
 });
 
 const showMv = () => ($("mvText").textContent = `${$("mv").value} mV`);
@@ -166,9 +167,8 @@ async function refresh(paint) {
 // upright however the frame hangs (rotation 1 when turned: the text's top is the panel's right
 // edge). Fonts stand in for the firmware's Adafruit GFX ones at about the same size.
 const MARGIN = 40, HEAD = 88, QR_MODULE = 5;
-// The code screen: each code character CODE_W×CODE_H dots of CODE_SCALE units, in four cards
-const CODE_SCALE = 6, CODE_BOLD = 2, CARD_PAD = 12, CARD_SHADOW = 6;
-const CARD_W = 4 * CODE_W * CODE_SCALE + 3 * CODE_SCALE + CODE_BOLD + 2 * CARD_PAD, CARD_H = CODE_H * CODE_SCALE + 2 * CARD_PAD;
+// The code screen's cards
+const CODE_BOLD = 2, CARD_PAD = 14, CARD_SHADOW = 6;
 const SANS_18 = "bold 34px Helvetica, Arial, sans-serif", SANS_12 = "24px Helvetica, Arial, sans-serif";
 const MONO_9 = "bold 18px 'Courier New', monospace", MONO_12 = "bold 23px 'Courier New', monospace";
 const MONO_18 = "bold 35px 'Courier New', monospace", MONO_24 = "bold 47px 'Courier New', monospace";
@@ -209,14 +209,33 @@ const screen = (paint) => refresh(() => {
     rect(x, y, cw, ch, 0);
     rect(x + 3, y + 3, cw - 6, ch - 6, 1);
   };
-  // Four of the frame code's characters, CODE_SCALE units a dot (CODE_BOLD wider, so the strokes
-  // are heavier than the gaps): digits in blue, letters in black
-  const codeGroup = (g, x, top) => [...g].forEach((ch, i) => {
-    const rows = CODE_GLYPHS[ch] || [];
-    const ink = /[0-9]/.test(ch) ? 4 : 0;
-    rows.forEach((r, y) => [...r].forEach((d, x2) => d === "#" &&
-      rect(x + i * (CODE_W + 1) * CODE_SCALE + x2 * CODE_SCALE, top + y * CODE_SCALE, CODE_SCALE + CODE_BOLD, CODE_SCALE, ink)));
-  });
+  // The frame code in one card, read like a line of text: groups of four apart, with a red dash
+  // between them; on one line at the biggest size that fits maxW, or else on two (the dash at the
+  // end of the first). Digits blue, letters black; each character CODE_W×CODE_H dots of `sc`
+  // units, CODE_BOLD wider so the strokes are heavier than the gaps. Returns the card's height.
+  const codeCard = (code, x, y, maxW) => {
+    const groups = code.split("-");
+    const groupW = (sc) => 4 * CODE_W * sc + 3 * sc + CODE_BOLD;
+    const dashW = (sc) => 4 * sc + 2 * 2 * sc; // the dash and the space each side
+    const lineW = (sc, n) => n * groupW(sc) + (n - 1) * dashW(sc) + 2 * CARD_PAD;
+    let sc = [6, 5, 4].find((k) => lineW(k, 4) <= maxW), perLine = 4;
+    if (!sc) { perLine = 2; sc = [6, 5, 4, 3].find((k) => lineW(k, 2) + dashW(k) <= maxW) || 3; }
+    const lines = groups.length / perLine;
+    const cw = lineW(sc, perLine) + (lines > 1 ? dashW(sc) : 0), lineH = CODE_H * sc, gap = 3 * sc;
+    const ch = lines * lineH + (lines - 1) * gap + 2 * CARD_PAD;
+    card(x, y, cw, ch);
+    groups.forEach((g, n) => {
+      const line = Math.floor(n / perLine), col = n % perLine;
+      const gx = x + CARD_PAD + col * (groupW(sc) + dashW(sc)), gy = y + CARD_PAD + line * (lineH + gap);
+      [...g].forEach((c, i) => {
+        const rows = CODE_GLYPHS[c] || [], ink = /[0-9]/.test(c) ? 4 : 0;
+        rows.forEach((r, ry) => [...r].forEach((d, rx) => d === "#" &&
+          rect(gx + i * (CODE_W + 1) * sc + rx * sc, gy + ry * sc, sc + CODE_BOLD, sc, ink)));
+      });
+      if (n < groups.length - 1) rect(gx + groupW(sc) + 2 * sc, gy + 3 * sc, 4 * sc, sc, 3); // the dash
+    });
+    return ch;
+  };
   // Two lines at the bottom under a thin rule; returns where the rule is
   const footer = (line1, line2) => {
     const y = h - MARGIN - 62;
@@ -226,7 +245,7 @@ const screen = (paint) => refresh(() => {
     return y;
   };
   rect(0, 0, w, h, 1);
-  paint({ w, h, rect, text, width, header, footer, card, codeGroup });
+  paint({ w, h, rect, text, width, header, footer, card, codeCard });
   ctx.save();
   if (turned()) ctx.setTransform(0, 1, -1, 0, W, 0);
   ctx.drawImage(m, 0, 0);
