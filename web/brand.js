@@ -1,6 +1,7 @@
 // The wordmark and the ink test strip, drawn like the frame draws: whole ink dots only, no
 // anti-aliasing, shown with every dot visible. Inks match PALETTE in dither.js.
 import { PALETTE } from "./dither.js";
+import { layout, CAP } from "./pixelfont.js";
 
 const DOT = 2; // CSS px per ink dot
 const INK = Object.fromEntries(PALETTE.map((p) => [p.name, p.rgb]));
@@ -38,8 +39,33 @@ function dots(w, h, pick) {
 /**
  * A heading as crisp bitmap letters in solid ink, with a red shadow dithered 50% (a
  * checkerboard of dots), the way a 1-bit screen fakes a shadow. The text stays for screen readers.
+ * The letters are hand-drawn pixel letters (pixelfont.js), each letter dot a block of s×s ink
+ * dots one CSS px each, so the shadow's checkerboard is finer than the letters and never
+ * runs into them. Text with letters it doesn't have is drawn from the page's font instead.
  */
 async function wordmark(h) {
+  const text = (h.dataset.text ??= h.textContent.trim());
+  const rows = layout(text);
+  if (!rows) return fontWordmark(h);
+  const cs = getComputedStyle(h);
+  const s = Math.max(2, Math.round((parseFloat(cs.fontSize) * 0.8) / CAP)); // ink dots per letter dot
+  const shadow = s;
+  const w = rows[0].length * s + shadow, hgt = CAP * s + shadow;
+  const on = (x, y) => x >= 0 && y >= 0 && rows[Math.floor(y / s)]?.[Math.floor(x / s)] === "#";
+  const letters = dark() ? INK.white : INK.black;
+  const label = document.createElement("span");
+  label.className = "sr-only";
+  label.textContent = text;
+  const art = dots(w, hgt, (x, y) =>
+    on(x, y) ? letters : on(x - shadow, y - shadow) && (x + y) % 2 === 0 ? INK.red : null);
+  art.style.width = `${w}px`; // one CSS px per ink dot
+  art.style.height = `${hgt}px`;
+  h.replaceChildren(label, art);
+  h.classList.add("has-art");
+}
+
+/** Any other heading: the page's font, snapped to whole dots. */
+async function fontWordmark(h) {
   const cs = getComputedStyle(h);
   const px = Math.round(parseFloat(cs.fontSize) / DOT);
   const font = `${cs.fontWeight} ${px}px ${cs.fontFamily}`;
