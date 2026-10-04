@@ -56,11 +56,6 @@ static const uint16_t PALETTE[6] = {TFT_BLACK, TFT_WHITE, TFT_YELLOW, TFT_RED, T
 EPaper epaper;
 #else
 #include <GxEPD2_7C.h>
-#include <Fonts/FreeSansBold18pt7b.h>
-#include <Fonts/FreeSans12pt7b.h>
-#include <Fonts/FreeMonoBold9pt7b.h>
-#include <Fonts/FreeMonoBold12pt7b.h>
-#include <Fonts/FreeMonoBold18pt7b.h>
 #define PANEL_ID "7.3"
 static const int W = 800, H = 480;
 static const bool NATIVE_PORTRAIT = false;
@@ -69,6 +64,7 @@ static const uint16_t PALETTE[6] = {GxEPD_BLACK, GxEPD_WHITE, GxEPD_YELLOW, GxEP
 GxEPD2_7C<GxEPD2_730c_GDEP073E01, GxEPD2_730c_GDEP073E01::HEIGHT / 4>
     display(GxEPD2_730c_GDEP073E01(EPD_CS, EPD_DC, EPD_RST, EPD_BUSY));
 #endif
+#include "plex_fonts.h"  // IBM Plex, as on the website, at this screen's own size (tools/make_fonts.py)
 
 static const size_t IMAGE_BYTES = (size_t)W * H / 2;
 // Sealed download: IV (12) || ciphertext || GCM tag (16), see web/seal.js
@@ -167,17 +163,18 @@ int screenW() { return epaper.width() / S; }
 int screenH() { return epaper.height() / S; }
 void inkRect(int x, int y, int w, int h, int ink) { epaper.fillRect(x * S, y * S, w * S, h * S, PALETTE[ink]); }
 // Text with its baseline at y
+// (the fonts are made at this screen's size, so they're drawn 1:1, not doubled)
 void inkText(const char* text, int x, int y, const GFXfont* font, int ink) {
   epaper.setFreeFont(font);
-  epaper.setTextSize(S);
+  epaper.setTextSize(1);
   epaper.setTextColor(PALETTE[ink]);
   epaper.setTextDatum(L_BASELINE);
   epaper.drawString(text, x * S, y * S);
 }
-int textWidth(const char* text, const GFXfont* font) {
+int textWidth(const char* text, const GFXfont* font) {  // in screen units, like everything else
   epaper.setFreeFont(font);
   epaper.setTextSize(1);
-  return epaper.textWidth(text);
+  return epaper.textWidth(text) / S;
 }
 
 void drawPacked(const uint8_t* buf) {
@@ -331,9 +328,9 @@ void drawCodeChar(char ch, int x, int y, int sc) {
 void showMessage(const char* title, const char* line1, const char* line2 = nullptr) {
   drawScreen([&] {
     drawHeader(screenW());
-    inkText(title, MARGIN, HEAD + 70, &FreeSansBold18pt7b, INK_BLACK);
-    inkText(line1, MARGIN, HEAD + 130, &FreeSans12pt7b, INK_BLACK);
-    if (line2) inkText(line2, MARGIN, HEAD + 166, &FreeSans12pt7b, INK_BLACK);
+    inkText(title, MARGIN, HEAD + 70, &PlexTitle, INK_BLACK);
+    inkText(line1, MARGIN, HEAD + 130, &PlexBody, INK_BLACK);
+    if (line2) inkText(line2, MARGIN, HEAD + 166, &PlexBody, INK_BLACK);
   });
 }
 
@@ -550,7 +547,7 @@ void showCodeScreen() {
     inkRect(MARGIN + 3, 27, 38, 30, INK_WHITE);
     drawArt(ART_PAINTING, 12, MARGIN + 6, 30, 2);
     pixelWord("DomiFrame", MARGIN + 58, 24, 3, INK_BLACK);
-    inkText("COLOR E-PAPER PHOTO FRAMES", MARGIN + 58, 74, &FreeMonoBold9pt7b, INK_BLACK);
+    inkText("COLOR E-PAPER PHOTO FRAMES", MARGIN + 58, 74, &PlexLabel, INK_BLACK);
     const int strip[6] = {INK_BLACK, INK_BLUE, INK_GREEN, INK_YELLOW, INK_RED, INK_WHITE};
     int sx = w - MARGIN - 6 * 16 - 4;
     inkRect(sx, 31, 6 * 16 + 4, 16, INK_BLACK);  // centred on the wordmark
@@ -563,21 +560,24 @@ void showCodeScreen() {
     int cardX = wide ? w - MARGIN - cardW - CARD_SHADOW : (w - cardW) / 2;
     int colW = (qr && wide ? cardX - 30 : w - MARGIN) - MARGIN;
 
+    // A taller screen (the 13.3" landscape) has room to spare: some above, a little between
+    int ex = max(0, h - 480);
+
     // Headline
-    int y = 134;
-    inkText("Let's get your frame", MARGIN, y, &FreeSansBold18pt7b, INK_BLACK);
-    inkText("connected!", MARGIN, y += 36, &FreeSansBold18pt7b, INK_BLACK);
+    int y = 134 + ex * 2 / 5;
+    inkText("Let's get your frame", MARGIN, y, &PlexTitle, INK_BLACK);
+    inkText("connected!", MARGIN, y += 36, &PlexTitle, INK_BLACK);
 
     // The frame ID, in a pale field
-    inkText("FRAME ID", MARGIN, y += 40, &FreeMonoBold9pt7b, INK_RED);
+    inkText("FRAME ID", MARGIN, y += 40 + ex / 10, &PlexLabel, INK_RED);
     roundFill(MARGIN, y += 8, colW, 48, 7, paleBlue);
-    const GFXfont* idFont = &FreeMonoBold18pt7b;
-    if (textWidth(frameId.c_str(), idFont) + 32 > colW) idFont = &FreeMonoBold12pt7b;
-    if (textWidth(frameId.c_str(), idFont) + 32 > colW) idFont = &FreeMonoBold9pt7b;
+    const GFXfont* idFont = &PlexIdL;
+    if (textWidth(frameId.c_str(), idFont) + 32 > colW) idFont = &PlexIdM;
+    if (textWidth(frameId.c_str(), idFont) + 32 > colW) idFont = &PlexIdS;
     inkText(frameId.c_str(), MARGIN + 16, y + 34, idFont, INK_BLACK);
 
     // The code, in a pale field: one line at the biggest size that fits, else two
-    inkText("FRAME CODE", MARGIN, y += 48 + 30, &FreeMonoBold9pt7b, INK_RED);
+    inkText("FRAME CODE", MARGIN, y += 48 + 30 + ex / 10, &PlexLabel, INK_RED);
     const int pad = 14;
     auto gW = [](int sc) { return 4 * PF_CODE_W * sc + 3 * sc + CODE_BOLD; };
     auto dW = [](int sc) { return 5 * sc; };  // a space, the dash, a space
@@ -604,7 +604,7 @@ void showCodeScreen() {
     y += fieldH;
 
     // The QR code, in a card under a blue bar, with blue corner marks
-    int cardY = 104;
+    int cardY = 104 + ex * 2 / 5;
     if (qr) {
       if (!wide) cardY = y + 28;
       roundFill(cardX + CARD_SHADOW, cardY + CARD_SHADOW, cardW, cardH, 10,
@@ -614,7 +614,7 @@ void showCodeScreen() {
         return edge || y < cardY + 30 ? (int)INK_BLUE : (int)INK_WHITE;
       });
       const char* label = "SCAN TO OPEN";
-      inkText(label, cardX + (cardW - textWidth(label, &FreeMonoBold9pt7b)) / 2, cardY + 21, &FreeMonoBold9pt7b, INK_WHITE);
+      inkText(label, cardX + (cardW - textWidth(label, &PlexLabel)) / 2, cardY + 21, &PlexLabel, INK_WHITE);
       int qx = cardX + 12, qy = cardY + 30 + 12;
       for (int r = 0; r < qrSize; r++)
         for (int c = 0; c < qrSize; c++)
@@ -631,8 +631,8 @@ void showCodeScreen() {
     int shelfY = h - MARGIN, shelfW = 190, shelfX = w - MARGIN - shelfW;
     int ty = max((wide || !qr ? y : cardY + cardH) + 46, wide ? shelfY - 28 : 0);
     drawArt(ART_PHONE, 15, MARGIN, ty - 22, 2);
-    inkText(qr ? "Scan the QR code with a phone's camera," : "Enter the ID and code at", MARGIN + 38, ty, &FreeSans12pt7b, INK_BLACK);
-    inkText(qr ? "or enter the ID and code at domiframe.art." : "domiframe.art, under My frame.", MARGIN + 38, ty + 26, &FreeSans12pt7b, INK_BLACK);
+    inkText(qr ? "Scan the QR code with a phone's camera," : "Enter the ID and code at", MARGIN + 38, ty, &PlexBody, INK_BLACK);
+    inkText(qr ? "or enter the ID and code at domiframe.art." : "domiframe.art, under My frame.", MARGIN + 38, ty + 26, &PlexBody, INK_BLACK);
 
     // A frame on a shelf, beside a plant: in the corner, where there's room
     if (wide && qr && shelfY - 64 > cardY + cardH + CARD_SHADOW + 8) {

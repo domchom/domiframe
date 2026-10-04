@@ -167,7 +167,7 @@ const showCode = (id) => screen(({ w, h, rect, text, width }) => {
   rect(MARGIN + 3, 27, 38, 30, 1);
   art(ART_PAINTING, MARGIN + 6, 30, 2);
   pixelWord("DomiFrame", MARGIN + 58, 24, 3, 0);
-  text("COLOR E-PAPER PHOTO FRAMES", MARGIN + 58, 74, MONO_9, 0);
+  text("COLOR E-PAPER PHOTO FRAMES", MARGIN + 58, 74, LABEL, 0);
   const sx = w - MARGIN - 6 * 16 - 4;
   rect(sx, 31, 6 * 16 + 4, 16, 0); // centred on the wordmark
   [0, 4, 5, 2, 3, 1].forEach((ink, i) => rect(sx + 2 + i * 16, 33, 16, 12, ink));
@@ -179,19 +179,22 @@ const showCode = (id) => screen(({ w, h, rect, text, width }) => {
   const cardX = wide ? w - MARGIN - cardW - CARD_SHADOW : Math.floor((w - cardW) / 2);
   const colW = (qr && wide ? cardX - 30 : w - MARGIN) - MARGIN;
 
+  // A taller screen (the 13.3" landscape) has room to spare: some above, a little between
+  const ex = Math.max(0, h - 480);
+
   // Headline
-  let y = 134;
+  let y = 134 + Math.floor(ex * 2 / 5);
   text("Let's get your frame", MARGIN, y, SANS_18, 0);
   text("connected!", MARGIN, (y += 36), SANS_18, 0);
 
   // The frame ID, in a pale field
-  text("FRAME ID", MARGIN, (y += 40), MONO_9, 3);
+  text("FRAME ID", MARGIN, (y += 40 + Math.floor(ex / 10)), LABEL, 3);
   round(MARGIN, (y += 8), colW, 48, 7, tint);
-  const idFont = [MONO_18, MONO_12, MONO_9].find((f) => width(id, f) + 32 <= colW) || MONO_9;
+  const idFont = [ID_L, ID_M, ID_S].find((f) => width(id, f) + 32 <= colW) || ID_S;
   text(id, MARGIN + 16, y + 34, idFont, 0);
 
   // The code, in a pale field: one line at the biggest size that fits, else two
-  text("FRAME CODE", MARGIN, (y += 48 + 30), MONO_9, 3);
+  text("FRAME CODE", MARGIN, (y += 48 + 30 + Math.floor(ex / 10)), LABEL, 3);
   const pad = 14;
   let sc = [6, 5, 4].find((k) => codeLines(k, 4).lineW + 2 * pad <= colW), perLine = 4;
   if (!sc) { perLine = 2; sc = [6, 5, 4, 3].find((k) => codeLines(k, 2).lineW + 2 * pad <= colW) || 3; }
@@ -210,7 +213,7 @@ const showCode = (id) => screen(({ w, h, rect, text, width }) => {
   y += fieldH;
 
   // The QR code, in a card under a blue bar, with blue corner marks
-  let cardY = 104;
+  let cardY = 104 + Math.floor(ex * 2 / 5);
   if (qr) {
     if (!wide) cardY = y + 28;
     round(cardX + CARD_SHADOW, cardY + CARD_SHADOW, cardW, cardH, 10, checker(0));
@@ -221,7 +224,7 @@ const showCode = (id) => screen(({ w, h, rect, text, width }) => {
       return inside(xx, yy) ? null : 4;
     });
     const label = "SCAN TO OPEN";
-    text(label, cardX + Math.floor((cardW - width(label, MONO_9)) / 2), cardY + 21, MONO_9, 1);
+    text(label, cardX + Math.floor((cardW - width(label, LABEL)) / 2), cardY + 21, LABEL, 1);
     const qx = cardX + 12, qy = cardY + 30 + 12;
     for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
       if (qr.isDark(r, c)) rect(qx + (c + 2) * QR_MODULE, qy + (r + 2) * QR_MODULE, QR_MODULE, QR_MODULE, 0);
@@ -284,7 +287,12 @@ async function refresh(paint) {
 const MARGIN = 40, HEAD = 88, QR_MODULE = 5;
 // The code screen's cards
 const CODE_BOLD = 2, CARD_PAD = 14, CARD_SHADOW = 6;
-const SANS_18 = "bold 34px Helvetica, Arial, sans-serif", SANS_12 = "24px Helvetica, Arial, sans-serif";
+// IBM Plex, as on the website and on the frame (firmware/tools/make_fonts.py makes its fonts)
+const TITLE = "700 34px 'IBM Plex Sans Condensed'", BODY = "500 20px 'IBM Plex Sans'";
+const LABEL = "700 14px 'IBM Plex Mono'", LABEL_TRACKING = 2;
+const ID_L = "600 28px 'IBM Plex Mono'", ID_M = "600 22px 'IBM Plex Mono'", ID_S = "600 16px 'IBM Plex Mono'";
+await Promise.all([TITLE, BODY, LABEL, ID_L].map((f) => document.fonts.load(f).catch(() => {})));
+const SANS_18 = TITLE, SANS_12 = BODY;
 const MONO_9 = "bold 18px 'Courier New', monospace", MONO_12 = "bold 23px 'Courier New', monospace";
 const MONO_18 = "bold 35px 'Courier New', monospace", MONO_24 = "bold 47px 'Courier New', monospace";
 
@@ -297,8 +305,9 @@ const screen = (paint) => refresh(() => {
   const w = m.width / k, h = m.height / k;
   const font = (f) => f.replace(/(\d+)px/, (_, px) => `${px * k}px`);
   const rect = (x, y, rw, rh, ink) => { c.fillStyle = rgb(ink); c.fillRect(x * k, y * k, rw * k, rh * k); };
-  const text = (t, x, y, f, ink) => { c.font = font(f); c.fillStyle = rgb(ink); c.fillText(t, x * k, y * k); };
-  const width = (t, f) => { c.font = f; return c.measureText(t).width; };
+  const track = (f, kk) => { c.letterSpacing = f === LABEL ? `${LABEL_TRACKING * kk}px` : "0px"; };
+  const text = (t, x, y, f, ink) => { c.font = font(f); track(f, k); c.fillStyle = rgb(ink); c.fillText(t, x * k, y * k); };
+  const width = (t, f) => { c.font = f; track(f, 1); return c.measureText(t).width; };
   // A 50% checkerboard of one ink: the site's dithered shadows
   const dither = (x, y, rw, rh, ink) => {
     for (let yy = y; yy < y + rh; yy++) for (let xx = x; xx < x + rw; xx++) if ((xx + yy) % 2 === 0) rect(xx, yy, 1, 1, ink);
