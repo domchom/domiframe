@@ -97,44 +97,159 @@ function showUploadLink(id) {
   if (!a.hidden) a.href = `/f/${id}#k=${frameCode(id)}`;
 }
 
-// The firmware's showCodeScreen(), laid out like a ticket: what to type on the left, in the
-// order it's typed (the frame ID, then the code in one card that reads like a line of text), and
-// a QR code card on the right that opens the frame's page with both filled in (the code after
-// the #, so it's never sent to the server); on a tall screen, the QR card goes underneath.
-const showCode = (id) => screen(({ w, h, rect, text, width, header, card, codeCard }) => {
+// ---- The code screen (the firmware's showCodeScreen) -----------------------------------
+// A friendly card for setting the frame up, in the six inks: the app's icon and the wordmark,
+// a headline, the frame ID and then the code in pale fields (sparse blue dots on white read as
+// pale blue), the QR code in a card under a blue SCAN TO OPEN bar, and a little picture of a
+// frame on a shelf. The code reads like a line of text: red dashes between its groups, two lines
+// when it doesn't fit on one. Everything is drawn from rectangles, as on the frame.
+
+// Pixel art, one letter an ink: k black, w white, r red, y yellow, g green, b blue, o orange
+// (red and yellow dithered), . nothing. The same in firmware/src/main.cpp.
+const ART_PAINTING = [ // the app icon's painting: sunset, hills, water
+  "rrrrrrrrrrrrrrrr", "ooooooooooowwwoo", "oooooooooowwwwwo", "yyyyyyyyyyywwwyy",
+  "yyyyggyyyyyyyyyy", "yyygggggyyggyyyy", "yygggggggggggyyy", "gggggggggggggggg",
+  "bbbbbbbbbbbwbbbb", "bbbbbbbbbbwbwbbb", "bbbbbbbbbbbwbbbb", "bbbbbbbbbbbbbbbb",
+];
+const ART_PLANT = [
+  "......gg......", ".....gggg.....", "gg...gggg...gg", "ggg..gggg..ggg", ".ggg.gggg.ggg.",
+  "..ggggggggg...", "...ggggggg....", "....ggggg.....", ".....ggg......", "......g.......",
+];
+const ART_PHONE = [
+  "kkkkkkkk", "kwwwwwwk", "kwwwwwwk", "kwwwwwwk", "kwwwwwwk", "kwwwwwwk", "kwwwwwwk",
+  "kwwwwwwk", "kwwwwwwk", "kkkkkkkk", "kkkwwkkk", "kkkkkkkk",
+];
+const ART_INK = { k: 0, w: 1, y: 2, r: 3, b: 4, g: 5 };
+
+const showCode = (id) => screen(({ w, h, rect, text, width }) => {
   const code = frameCode(id), qrText = `${location.origin}/f/${id}#k=${code}`;
-  header();
   let qr = null;
   if (window.qrcode) {
     qr = window.qrcode(0, "M");
     qr.addData(qrText);
     qr.make();
   }
-  const wide = w > h, n = qr ? qr.getModuleCount() : 0, side = qr ? (n + 8) * QR_MODULE + 6 : 0;
-  const right = qr && wide ? w - MARGIN - side - CARD_SHADOW - 30 : w - MARGIN; // the left column's edge
-  const room = right - MARGIN;
-  let y = HEAD + 40;
-  text("FRAME ID", MARGIN, y, MONO_9, 3);
-  const idFont = [MONO_18, MONO_12, MONO_9].find((f) => width(id, f) <= room) || MONO_9;
-  text(id, MARGIN, (y += 36), idFont, 0);
-  text("FRAME CODE", MARGIN, (y += 46), MONO_9, 3);
-  y += codeCard(code, MARGIN, y + 10, room - CARD_SHADOW) + 10;
-  if (qr) {
-    const qx = wide ? w - MARGIN - side - CARD_SHADOW : Math.floor((w - side) / 2);
-    const qy = wide ? HEAD + 40 + 12 : y + 64;
-    text("SCAN TO OPEN", qx, qy - 12, MONO_9, 3);
-    card(qx, qy, side, side);
-    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
-      if (qr.isDark(r, c)) rect(qx + 3 + (c + 4) * QR_MODULE, qy + 3 + (r + 4) * QR_MODULE, QR_MODULE, QR_MODULE, 0);
+  const dot = (x, y, ink) => rect(x, y, 1, 1, ink);
+  // A rounded rectangle, a row at a time: pick(x, y) -> ink, or null for none
+  const round = (x, y, rw, rh, r, pick) => {
+    for (let dy = 0; dy < rh; dy++) {
+      const e = dy < r ? r - dy - 0.5 : dy >= rh - r ? dy - (rh - r) + 0.5 : 0;
+      const inset = e ? Math.round(r - Math.sqrt(Math.max(0, r * r - e * e))) : 0;
+      for (let dx = inset; dx < rw - inset; dx++) {
+        const ink = pick(x + dx, y + dy);
+        if (ink != null) dot(x + dx, y + dy, ink);
+      }
     }
-    if (!wide) y = qy + side;
+  };
+  const solid = (ink) => () => ink;
+  // Pale blue: 1 dot in 8, on a staggered grid so it reads as a flat tint, not stripes
+  const tint = (xx, yy) => ((yy & 1) === 0 && (xx & 3) === (yy & 2) ? 4 : 1);
+  const checker = (ink) => (xx, yy) => ((xx + yy) & 1 ? null : ink);
+  const art = (rows, x, y, sc) => rows.forEach((r, ry) => [...r].forEach((c, rx) => {
+    if (c === ".") return;
+    if (c === "o") { for (let a = 0; a < sc; a++) for (let b = 0; b < sc; b++) dot(x + rx * sc + a, y + ry * sc + b, (a + b) & 1 ? 2 : 3); return; }
+    rect(x + rx * sc, y + ry * sc, sc, sc, ART_INK[c]);
+  }));
+  const pixelWord = (t, x, top, sc, ink) => {
+    const rows = layout(t);
+    rows.forEach((r, y) => [...r].forEach((d, x2) => d === "#" && round(x + (x2 + 1) * sc, top + (y + 1) * sc, sc, sc, 0, checker(3))));
+    rows.forEach((r, y) => [...r].forEach((d, x2) => d === "#" && rect(x + x2 * sc, top + y * sc, sc, sc, ink)));
+    return rows[0].length * sc;
+  };
+  const codeLines = (sc, perLine) => {
+    const groupW = 4 * CODE_W * sc + 3 * sc + CODE_BOLD, dashW = 5 * sc; // a space, the dash, a space
+    return { groupW, dashW, lineW: perLine * groupW + (perLine - 1) * dashW + (perLine < 4 ? dashW : 0) };
+  };
+
+  // Header: the icon, the wordmark and what it is, the inks at the right, over a rule
+  round(MARGIN, 24, 44, 36, 5, solid(0));
+  rect(MARGIN + 3, 27, 38, 30, 1);
+  art(ART_PAINTING, MARGIN + 6, 30, 2);
+  pixelWord("DomiFrame", MARGIN + 58, 24, 3, 0);
+  text("COLOR E-PAPER PHOTO FRAMES", MARGIN + 58, 74, MONO_9, 0);
+  const sx = w - MARGIN - 6 * 16 - 4;
+  rect(sx, 34, 6 * 16 + 4, 16, 0);
+  [0, 4, 5, 2, 3, 1].forEach((ink, i) => rect(sx + 2 + i * 16, 36, 16, 12, ink));
+  rect(MARGIN, 92, w - 2 * MARGIN, 2, 0);
+
+  const wide = w > h;
+  const n = qr ? qr.getModuleCount() : 0, qside = qr ? (n + 4) * QR_MODULE : 0;
+  const cardW = qside + 24, cardH = qside + 24 + 30;
+  const cardX = wide ? w - MARGIN - cardW - CARD_SHADOW : Math.floor((w - cardW) / 2);
+  const colW = (qr && wide ? cardX - 30 : w - MARGIN) - MARGIN;
+
+  // Headline
+  let y = 134;
+  text("Let's get your frame", MARGIN, y, SANS_18, 0);
+  text("connected!", MARGIN, (y += 36), SANS_18, 0);
+
+  // The frame ID, in a pale field
+  text("FRAME ID", MARGIN, (y += 40), MONO_9, 3);
+  round(MARGIN, (y += 8), colW, 40, 7, tint);
+  const idFont = [MONO_12, MONO_9].find((f) => width(id, f) + 28 <= colW) || MONO_9;
+  text(id, MARGIN + 14, y + 28, idFont, 0);
+
+  // The code, in a pale field: one line at the biggest size that fits, else two
+  text("FRAME CODE", MARGIN, (y += 40 + 34), MONO_9, 3);
+  const pad = 14;
+  let sc = [6, 5, 4].find((k) => codeLines(k, 4).lineW + 2 * pad <= colW), perLine = 4;
+  if (!sc) { perLine = 2; sc = [6, 5, 4, 3].find((k) => codeLines(k, 2).lineW + 2 * pad <= colW) || 3; }
+  const { groupW, dashW } = codeLines(sc, perLine), lines = 4 / perLine, lineH = CODE_H * sc, gap = 3 * sc;
+  const fieldH = lines * lineH + (lines - 1) * gap + 2 * pad;
+  round(MARGIN, (y += 8), colW, fieldH, 7, tint);
+  code.split("-").forEach((g, k) => {
+    const gx = MARGIN + pad + (k % perLine) * (groupW + dashW), gy = y + pad + Math.floor(k / perLine) * (lineH + gap);
+    [...g].forEach((c, i) => {
+      const rows = CODE_GLYPHS[c] || [], ink = /[0-9]/.test(c) ? 4 : 0;
+      rows.forEach((r, ry) => [...r].forEach((d, rx) => d === "#" &&
+        rect(gx + i * (CODE_W + 1) * sc + rx * sc, gy + ry * sc, sc + CODE_BOLD, sc, ink)));
+    });
+    if (k < 3) rect(gx + groupW + sc, gy + 3 * sc, 3 * sc, sc, 3);
+  });
+  y += fieldH;
+
+  // The QR code, in a card under a blue bar, with blue corner marks
+  let cardY = 104;
+  if (qr) {
+    if (!wide) cardY = y + 28;
+    round(cardX + CARD_SHADOW, cardY + CARD_SHADOW, cardW, cardH, 10, checker(0));
+    round(cardX, cardY, cardW, cardH, 10, (xx, yy) => (yy < cardY + 30 ? 4 : 1));
+    // its outline, in blue
+    round(cardX, cardY, cardW, cardH, 10, (xx, yy) => {
+      const inside = (x2, y2) => x2 >= cardX + 2 && x2 < cardX + cardW - 2 && y2 >= cardY + 2 && y2 < cardY + cardH - 2;
+      return inside(xx, yy) ? null : 4;
+    });
+    const label = "SCAN TO OPEN";
+    text(label, cardX + Math.floor((cardW - width(label, MONO_9)) / 2), cardY + 21, MONO_9, 1);
+    const qx = cardX + 12, qy = cardY + 30 + 12;
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      if (qr.isDark(r, c)) rect(qx + (c + 2) * QR_MODULE, qy + (r + 2) * QR_MODULE, QR_MODULE, QR_MODULE, 0);
+    }
+    const L = 18, T = 4, x1 = qx - 2, y1 = qy - 2, x2 = qx + qside + 2, y2 = qy + qside + 2;
+    for (const [cx, cy, sx2, sy2] of [[x1, y1, 1, 1], [x2, y1, -1, 1], [x1, y2, 1, -1], [x2, y2, -1, -1]]) {
+      rect(sx2 > 0 ? cx : cx - L, sy2 > 0 ? cy : cy - T, L, T, 4);
+      rect(sx2 > 0 ? cx : cx - T, sy2 > 0 ? cy : cy - L, T, L, 4);
+    }
   }
-  // How to use it, under everything on the left
-  const at = location.host;
-  const lines = qr ? [`Scan the QR code with a phone's camera,`, `or enter the ID and code at ${at}.`]
-    : [`Enter the ID and code at ${at},`, "under My frame."];
-  const ly = Math.max(y + 44, h - MARGIN - 36);
-  lines.forEach((l, i) => text(l, MARGIN, ly + i * 30, SANS_12, 0));
+
+  // How to use it, by a phone
+  const ty = (wide || !qr ? y : cardY + cardH) + 42;
+  art(ART_PHONE, MARGIN, ty - 16, 2);
+  text(qr ? "Scan the QR code with a phone's camera," : "Enter the ID and code at", MARGIN + 30, ty, SANS_12, 0);
+  text(qr ? "or enter the ID and code at domiframe.art." : "domiframe.art, under My frame.", MARGIN + 30, ty + 26, SANS_12, 0);
+
+  // A frame on a shelf, beside a plant: in the corner, where there's room
+  const shelfY = h - MARGIN, shelfX = w - MARGIN - 230;
+  if (wide && qr && shelfY - 64 > cardY + cardH + CARD_SHADOW + 8) {
+    round(shelfX, shelfY, 230, 10, 3, (xx, yy) => ((xx + yy) & 1 ? 2 : 3));
+    rect(shelfX, shelfY, 230, 2, 0);
+    const fx = shelfX + 120, fy = shelfY - 56;
+    round(fx, fy, 72, 56, 6, solid(0));
+    art(ART_PAINTING, fx + 4, fy + 4, 4);
+    art(ART_PLANT, shelfX + 46, shelfY - 46, 2);
+    round(shelfX + 50, shelfY - 26, 22, 26, 3, solid(0));
+    round(shelfX + 52, shelfY - 24, 18, 24, 2, solid(1));
+  }
 });
 
 const showMv = () => ($("mvText").textContent = `${$("mv").value} mV`);

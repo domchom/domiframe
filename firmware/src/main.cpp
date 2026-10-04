@@ -307,23 +307,16 @@ void drawHeader(int w) {
   inkRect(MARGIN, HEAD - 3, w - 2 * MARGIN, 3, INK_BLACK);
 }
 
-// A card on the screen: a black border on white, with a dithered shadow (as the site's prints)
+// Cards on the code screen get a dithered shadow this far down and right, as the site's prints
 static const int CARD_SHADOW = 6;
-void drawCard(int x, int y, int w, int h) {
-  inkDither(x + CARD_SHADOW, y + CARD_SHADOW, w, h, INK_BLACK);
-  inkRect(x, y, w, h, INK_BLACK);
-  inkRect(x + 3, y + 3, w - 6, h - 6, INK_WHITE);
-}
+
 
 // The frame code in one card, read like a line of text: groups of four apart, with a red dash
 // between them; on one line at the biggest size that fits maxW, or else on two (the dash at the
 // end of the first). Digits blue, letters black, each character drawn to differ from its
 // look-alikes (pixel_font.h), PF_CODE_W x PF_CODE_H dots of sc units, CODE_BOLD wider so the
 // strokes are heavier than the gaps. web/sim.js codeCard draws the same. Returns its height.
-static const int CODE_BOLD = 2, CARD_PAD = 14;
-static int groupW(int sc) { return 4 * PF_CODE_W * sc + 3 * sc + CODE_BOLD; }
-static int dashW(int sc) { return 4 * sc + 2 * 2 * sc; }
-static int lineW(int sc, int n) { return n * groupW(sc) + (n - 1) * dashW(sc) + 2 * CARD_PAD; }
+static const int CODE_BOLD = 2;
 
 void drawCodeChar(char ch, int x, int y, int sc) {
   const PfCodeGlyph* g = nullptr;
@@ -335,42 +328,6 @@ void drawCodeChar(char ch, int x, int y, int sc) {
       if (g->rows[r][c] == '#') inkRect(x + c * sc, y + r * sc, sc + CODE_BOLD, sc, ink);
 }
 
-int drawCodeCard(const String& code, int x, int y, int maxW) {
-  String groups[4];
-  String rest = code;
-  for (int i = 0; i < 4; i++) {
-    int dash = rest.indexOf('-');
-    groups[i] = dash < 0 ? rest : rest.substring(0, dash);
-    rest = dash < 0 ? "" : rest.substring(dash + 1);
-  }
-  int sc = 0, perLine = 4;
-  for (int k = 6; k >= 4 && !sc; k--) if (lineW(k, 4) <= maxW) sc = k;
-  if (!sc) {
-    perLine = 2;
-    for (int k = 6; k >= 3 && !sc; k--) if (lineW(k, 2) + dashW(k) <= maxW) sc = k;
-    if (!sc) sc = 3;
-  }
-  int lines = 4 / perLine;
-  int cw = lineW(sc, perLine) + (lines > 1 ? dashW(sc) : 0), lineH = PF_CODE_H * sc, gap = 3 * sc;
-  int ch = lines * lineH + (lines - 1) * gap + 2 * CARD_PAD;
-  drawCard(x, y, cw, ch);
-  for (int n = 0; n < 4; n++) {
-    int gx = x + CARD_PAD + (n % perLine) * (groupW(sc) + dashW(sc)), gy = y + CARD_PAD + (n / perLine) * (lineH + gap);
-    for (int i = 0; i < (int)groups[n].length(); i++) drawCodeChar(groups[n][i], gx + i * (PF_CODE_W + 1) * sc, gy, sc);
-    if (n < 3) inkRect(gx + groupW(sc) + 2 * sc, gy + 3 * sc, 4 * sc, sc, INK_RED);  // the dash
-  }
-  return ch;
-}
-
-// Two lines at the bottom, under a thin rule; returns where the rule is
-int drawFooter(int w, int h, const char* line1, const char* line2) {
-  int y = h - MARGIN - 62;
-  inkRect(MARGIN, y, w - 2 * MARGIN, 1, INK_BLACK);
-  inkText(line1, MARGIN, y + 32, &FreeSans12pt7b, INK_BLACK);
-  if (line2) inkText(line2, MARGIN, y + 62, &FreeSans12pt7b, INK_BLACK);
-  return y;
-}
-
 void showMessage(const char* title, const char* line1, const char* line2 = nullptr) {
   drawScreen([&] {
     drawHeader(screenW());
@@ -380,16 +337,8 @@ void showMessage(const char* title, const char* line1, const char* line2 = nullp
   });
 }
 
-// The QR code made by makeQr, QR_MODULE units a module, with its quiet zone, as a card;
-// (x, y) is the card's top-left corner
+// The QR code made by makeQr is drawn QR_MODULE units a module (showCodeScreen)
 static const int QR_MODULE = 5;
-int qrSide() { return (qrSize + 8) * QR_MODULE + 6; }
-void drawQr(int x, int y) {
-  drawCard(x, y, qrSide(), qrSide());
-  for (int r = 0; r < qrSize; r++)
-    for (int c = 0; c < qrSize; c++)
-      if (qrDots[r][c]) inkRect(x + 3 + (c + 4) * QR_MODULE, y + 3 + (r + 4) * QR_MODULE, QR_MODULE, QR_MODULE, INK_BLACK);
-}
 
 int readBatteryMv() {
   pinMode(BAT_ADC_ENABLE_PIN, OUTPUT);
@@ -529,9 +478,65 @@ bool unsealPicture(const uint8_t* sealed, uint8_t* out) {
   return rc == 0;
 }
 
-// Laid out like a ticket: what to type on the left, in the order it's typed (the frame ID, then
-// the code in one card that reads like a line of text), and a QR code card on the right; on a
-// tall screen, the QR card goes underneath. web/sim.js showCode draws the same.
+// ---- The code screen ---------------------------------------------------------------------
+// A friendly card for setting the frame up, in the six inks: the app's icon and the wordmark,
+// a headline, the frame ID and then the code in pale fields (sparse blue dots on white read as
+// pale blue), the QR code in a card under a blue SCAN TO OPEN bar, and a little picture of a
+// frame on a shelf. The code reads like a line of text: red dashes between its groups, two lines
+// when it doesn't fit on one. web/sim.js showCode draws the same.
+
+// Pixel art, one letter an ink: k black, w white, r red, y yellow, g green, b blue, o orange
+// (red and yellow dithered), . nothing. The same as in web/sim.js.
+static const char* const ART_PAINTING[] = {
+  "rrrrrrrrrrrrrrrr", "ooooooooooowwwoo", "oooooooooowwwwwo", "yyyyyyyyyyywwwyy",
+  "yyyyggyyyyyyyyyy", "yyygggggyyggyyyy", "yygggggggggggyyy", "gggggggggggggggg",
+  "bbbbbbbbbbbwbbbb", "bbbbbbbbbbwbwbbb", "bbbbbbbbbbbwbbbb", "bbbbbbbbbbbbbbbb",
+};
+static const char* const ART_PLANT[] = {
+  "......gg......", ".....gggg.....", "gg...gggg...gg", "ggg..gggg..ggg", ".ggg.gggg.ggg.",
+  "..ggggggggg...", "...ggggggg....", "....ggggg.....", ".....ggg......", "......g.......",
+};
+static const char* const ART_PHONE[] = {
+  "kkkkkkkk", "kwwwwwwk", "kwwwwwwk", "kwwwwwwk", "kwwwwwwk", "kwwwwwwk", "kwwwwwwk",
+  "kwwwwwwk", "kwwwwwwk", "kkkkkkkk", "kkkwwkkk", "kkkkkkkk",
+};
+
+void inkDot(int x, int y, int ink) { inkRect(x, y, 1, 1, ink); }
+
+void drawArt(const char* const* rows, int n, int x, int y, int sc) {
+  for (int ry = 0; ry < n; ry++)
+    for (int rx = 0; rows[ry][rx]; rx++) {
+      char c = rows[ry][rx];
+      int px = x + rx * sc, py = y + ry * sc;
+      if (c == '.') continue;
+      if (c == 'o') {
+        for (int a = 0; a < sc; a++)
+          for (int b = 0; b < sc; b++) inkDot(px + a, py + b, (a + b) & 1 ? INK_YELLOW : INK_RED);
+        continue;
+      }
+      int ink = c == 'k' ? INK_BLACK : c == 'w' ? INK_WHITE : c == 'y' ? INK_YELLOW : c == 'r' ? INK_RED
+              : c == 'b' ? INK_BLUE : INK_GREEN;
+      inkRect(px, py, sc, sc, ink);
+    }
+}
+
+// A rounded rectangle, a row at a time: pick(x, y) -> ink, or -1 for none
+template <typename Pick>
+void roundFill(int x, int y, int w, int h, int r, Pick pick) {
+  for (int dy = 0; dy < h; dy++) {
+    float e = dy < r ? r - dy - 0.5f : dy >= h - r ? dy - (h - r) + 0.5f : 0;
+    int inset = e > 0 ? (int)lroundf(r - sqrtf(fmaxf(0, r * r - e * e))) : 0;
+    for (int dx = inset; dx < w - inset; dx++) {
+      int ink = pick(x + dx, y + dy);
+      if (ink >= 0) inkDot(x + dx, y + dy, ink);
+    }
+  }
+}
+// Pale blue: 1 dot in 8, on a staggered grid so it reads as a flat tint, not stripes
+int paleBlue(int x, int y) { return (y & 1) == 0 && (x & 3) == (y & 2) ? INK_BLUE : INK_WHITE; }
+int inkBlack(int, int) { return INK_BLACK; }
+int inkWhite(int, int) { return INK_WHITE; }
+
 void showCodeScreen() {
   // The QR code opens the frame's page with the code filled in. It's after the #, which
   // browsers never send to the server.
@@ -539,32 +544,105 @@ void showCodeScreen() {
   bool qr = makeQr(link.c_str()) > 0;
   drawScreen([&] {
     int w = screenW(), h = screenH();
-    drawHeader(w);
+
+    // Header: the icon, the wordmark and what it is, the inks at the right, over a rule
+    roundFill(MARGIN, 24, 44, 36, 5, inkBlack);
+    inkRect(MARGIN + 3, 27, 38, 30, INK_WHITE);
+    drawArt(ART_PAINTING, 12, MARGIN + 6, 30, 2);
+    pixelWord("DomiFrame", MARGIN + 58, 24, 3, INK_BLACK);
+    inkText("COLOR E-PAPER PHOTO FRAMES", MARGIN + 58, 74, &FreeMonoBold9pt7b, INK_BLACK);
+    const int strip[6] = {INK_BLACK, INK_BLUE, INK_GREEN, INK_YELLOW, INK_RED, INK_WHITE};
+    int sx = w - MARGIN - 6 * 16 - 4;
+    inkRect(sx, 34, 6 * 16 + 4, 16, INK_BLACK);
+    for (int i = 0; i < 6; i++) inkRect(sx + 2 + i * 16, 36, 16, 12, strip[i]);
+    inkRect(MARGIN, 92, w - 2 * MARGIN, 2, INK_BLACK);
+
     bool wide = w > h;
-    int side = qr ? qrSide() : 0;
-    int right = qr && wide ? w - MARGIN - side - CARD_SHADOW - 30 : w - MARGIN;  // the left column's edge
-    int room = right - MARGIN;
+    int qside = qr ? (qrSize + 4) * QR_MODULE : 0;
+    int cardW = qside + 24, cardH = qside + 24 + 30;
+    int cardX = wide ? w - MARGIN - cardW - CARD_SHADOW : (w - cardW) / 2;
+    int colW = (qr && wide ? cardX - 30 : w - MARGIN) - MARGIN;
 
-    int y = HEAD + 40;
-    inkText("FRAME ID", MARGIN, y, &FreeMonoBold9pt7b, INK_RED);
-    const GFXfont* idFont = &FreeMonoBold18pt7b;
-    if (textWidth(frameId.c_str(), idFont) > room) idFont = &FreeMonoBold12pt7b;
-    if (textWidth(frameId.c_str(), idFont) > room) idFont = &FreeMonoBold9pt7b;
-    inkText(frameId.c_str(), MARGIN, y += 36, idFont, INK_BLACK);
-    inkText("FRAME CODE", MARGIN, y += 46, &FreeMonoBold9pt7b, INK_RED);
-    y += drawCodeCard(frameCode, MARGIN, y + 10, room - CARD_SHADOW) + 10;
+    // Headline
+    int y = 134;
+    inkText("Let's get your frame", MARGIN, y, &FreeSansBold18pt7b, INK_BLACK);
+    inkText("connected!", MARGIN, y += 36, &FreeSansBold18pt7b, INK_BLACK);
 
-    if (qr) {
-      int qx = wide ? w - MARGIN - side - CARD_SHADOW : (w - side) / 2;
-      int qy = wide ? HEAD + 40 + 12 : y + 64;
-      inkText("SCAN TO OPEN", qx, qy - 12, &FreeMonoBold9pt7b, INK_RED);
-      drawQr(qx, qy);
-      if (!wide) y = qy + side;
+    // The frame ID, in a pale field
+    inkText("FRAME ID", MARGIN, y += 40, &FreeMonoBold9pt7b, INK_RED);
+    roundFill(MARGIN, y += 8, colW, 40, 7, paleBlue);
+    const GFXfont* idFont = textWidth(frameId.c_str(), &FreeMonoBold12pt7b) + 28 <= colW ? &FreeMonoBold12pt7b : &FreeMonoBold9pt7b;
+    inkText(frameId.c_str(), MARGIN + 14, y + 28, idFont, INK_BLACK);
+
+    // The code, in a pale field: one line at the biggest size that fits, else two
+    inkText("FRAME CODE", MARGIN, y += 40 + 34, &FreeMonoBold9pt7b, INK_RED);
+    const int pad = 14;
+    auto gW = [](int sc) { return 4 * PF_CODE_W * sc + 3 * sc + CODE_BOLD; };
+    auto dW = [](int sc) { return 5 * sc; };  // a space, the dash, a space
+    auto lW = [&](int sc, int per) { return per * gW(sc) + (per - 1) * dW(sc) + (per < 4 ? dW(sc) : 0); };
+    int sc = 0, perLine = 4;
+    for (int k = 6; k >= 4 && !sc; k--) if (lW(k, 4) + 2 * pad <= colW) sc = k;
+    if (!sc) {
+      perLine = 2;
+      for (int k = 6; k >= 3 && !sc; k--) if (lW(k, 2) + 2 * pad <= colW) sc = k;
+      if (!sc) sc = 3;
     }
-    // How to use it, under everything on the left
-    int ly = max(y + 44, h - MARGIN - 36);
-    inkText(qr ? "Scan the QR code with a phone's camera," : "Enter the ID and code at domiframe.art,", MARGIN, ly, &FreeSans12pt7b, INK_BLACK);
-    inkText(qr ? "or enter the ID and code at domiframe.art." : "under My frame.", MARGIN, ly + 30, &FreeSans12pt7b, INK_BLACK);
+    int lines = 4 / perLine, lineH = PF_CODE_H * sc, gap = 3 * sc;
+    int fieldH = lines * lineH + (lines - 1) * gap + 2 * pad;
+    roundFill(MARGIN, y += 8, colW, fieldH, 7, paleBlue);
+    String rest = frameCode;
+    for (int k = 0; k < 4; k++) {
+      int dash = rest.indexOf('-');
+      String g = dash < 0 ? rest : rest.substring(0, dash);
+      rest = dash < 0 ? "" : rest.substring(dash + 1);
+      int gx = MARGIN + pad + (k % perLine) * (gW(sc) + dW(sc)), gy = y + pad + (k / perLine) * (lineH + gap);
+      for (int i = 0; i < (int)g.length(); i++) drawCodeChar(g[i], gx + i * (PF_CODE_W + 1) * sc, gy, sc);
+      if (k < 3) inkRect(gx + gW(sc) + sc, gy + 3 * sc, 3 * sc, sc, INK_RED);
+    }
+    y += fieldH;
+
+    // The QR code, in a card under a blue bar, with blue corner marks
+    int cardY = 104;
+    if (qr) {
+      if (!wide) cardY = y + 28;
+      roundFill(cardX + CARD_SHADOW, cardY + CARD_SHADOW, cardW, cardH, 10,
+                [](int x, int y) { return (x + y) & 1 ? -1 : (int)INK_BLACK; });
+      roundFill(cardX, cardY, cardW, cardH, 10, [&](int x, int y) {
+        bool edge = x < cardX + 2 || x >= cardX + cardW - 2 || y < cardY + 2 || y >= cardY + cardH - 2;
+        return edge || y < cardY + 30 ? (int)INK_BLUE : (int)INK_WHITE;
+      });
+      const char* label = "SCAN TO OPEN";
+      inkText(label, cardX + (cardW - textWidth(label, &FreeMonoBold9pt7b)) / 2, cardY + 21, &FreeMonoBold9pt7b, INK_WHITE);
+      int qx = cardX + 12, qy = cardY + 30 + 12;
+      for (int r = 0; r < qrSize; r++)
+        for (int c = 0; c < qrSize; c++)
+          if (qrDots[r][c]) inkRect(qx + (c + 2) * QR_MODULE, qy + (r + 2) * QR_MODULE, QR_MODULE, QR_MODULE, INK_BLACK);
+      const int L = 18, T = 4, x1 = qx - 2, y1 = qy - 2, x2 = qx + qside + 2, y2 = qy + qside + 2;
+      const int corners[4][4] = {{x1, y1, 1, 1}, {x2, y1, -1, 1}, {x1, y2, 1, -1}, {x2, y2, -1, -1}};
+      for (auto& k : corners) {
+        inkRect(k[2] > 0 ? k[0] : k[0] - L, k[3] > 0 ? k[1] : k[1] - T, L, T, INK_BLUE);
+        inkRect(k[2] > 0 ? k[0] : k[0] - T, k[3] > 0 ? k[1] : k[1] - L, T, L, INK_BLUE);
+      }
+    }
+
+    // How to use it, by a phone
+    int ty = (wide || !qr ? y : cardY + cardH) + 42;
+    drawArt(ART_PHONE, 12, MARGIN, ty - 16, 2);
+    inkText(qr ? "Scan the QR code with a phone's camera," : "Enter the ID and code at", MARGIN + 30, ty, &FreeSans12pt7b, INK_BLACK);
+    inkText(qr ? "or enter the ID and code at domiframe.art." : "domiframe.art, under My frame.", MARGIN + 30, ty + 26, &FreeSans12pt7b, INK_BLACK);
+
+    // A frame on a shelf, beside a plant: in the corner, where there's room
+    int shelfY = h - MARGIN, shelfX = w - MARGIN - 230;
+    if (wide && qr && shelfY - 64 > cardY + cardH + CARD_SHADOW + 8) {
+      roundFill(shelfX, shelfY, 230, 10, 3, [](int x, int y) { return (x + y) & 1 ? (int)INK_YELLOW : (int)INK_RED; });
+      inkRect(shelfX, shelfY, 230, 2, INK_BLACK);
+      int fx = shelfX + 120, fy = shelfY - 56;
+      roundFill(fx, fy, 72, 56, 6, inkBlack);
+      drawArt(ART_PAINTING, 12, fx + 4, fy + 4, 4);
+      drawArt(ART_PLANT, 10, shelfX + 46, shelfY - 46, 2);
+      roundFill(shelfX + 50, shelfY - 26, 22, 26, 3, inkBlack);
+      roundFill(shelfX + 52, shelfY - 24, 18, 24, 2, inkWhite);
+    }
   });
   etag = "";  // the picture comes back at the next wake
   saveString("etag", etag);
