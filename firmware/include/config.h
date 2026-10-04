@@ -2,7 +2,7 @@
 
 // ---- Server ---------------------------------------------------------------
 #define SERVER_BASE "https://domiframe.art"
-#define FW_VERSION "0.8.0"  // tools/release.py publishes it; raise it for every release
+#define FW_VERSION "0.9.0"  // tools/release.py publishes it; raise it for every release
 
 // Which build this is, so updates over Wi-Fi only ever bring the same build (platformio.ini envs)
 #if defined(DOMIFRAME_PANEL_13IN3)
