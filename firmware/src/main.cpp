@@ -880,6 +880,10 @@ bool fetchAndDraw(int batteryMv) {
   HTTPClient http;
   String url = String(SERVER_BASE) + "/api/frames/" + frameId + "/image";
   if (!http.begin(client, url)) return false;
+  // HTTP/1.0: no chunked encoding. The picture is read straight off the connection below, and a
+  // chunked reply (which Netlify sends when it doesn't give a length) would mix the chunk sizes
+  // into the picture, so it never opens.
+  http.useHTTP10(true);
   http.setTimeout(20000);
   http.addHeader("X-Device-Key", deviceKey);
   http.addHeader("X-Battery-Mv", String(batteryMv));
@@ -1039,6 +1043,7 @@ void installUpdate(int batteryMv) {
   HTTPClient http;
   String url = String(SERVER_BASE) + offer.url;
   if (!http.begin(client, url)) return failed("bad link");
+  http.useHTTP10(true);  // read straight off the connection, as the picture is: no chunks
   http.setTimeout(20000);
   http.useHTTP10(true);  // no chunked replies: the stream below is the file's bytes as they are
   int code = http.GET();
