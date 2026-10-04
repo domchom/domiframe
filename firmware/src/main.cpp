@@ -461,18 +461,46 @@ String accessTokenHash() {
 
 // Opens a sealed picture into out (IMAGE_BYTES). False if it wasn't sealed with our code.
 bool unsealPicture(const uint8_t* sealed, uint8_t* out) {
-  uint8_t key[32];
+  // In chunks through internal RAM: the picture lives in PSRAM, and the ESP32-S3's AES
+  // accelerator can't be trusted to read and write large PSRAM buffers directly
+  static const size_t CHUNK = 4096;
+  uint8_t* in = (uint8_t*)heap_caps_malloc(CHUNK, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  uint8_t* res = (uint8_t*)heap_caps_malloc(CHUNK, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (!in || !res) {
+    free(in);
+    free(res);
+    Serial.println("no memory to open the picture");
+    return false;
+  }
+  uint8_t key[32], tag[GCM_TAG_BYTES];
   frameKey("content", key);
   mbedtls_gcm_context gcm;
   mbedtls_gcm_init(&gcm);
   int rc = mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key, 256);
-  if (rc == 0) {
-    rc = mbedtls_gcm_auth_decrypt(&gcm, IMAGE_BYTES, sealed, GCM_IV_BYTES, nullptr, 0,
-                                  sealed + GCM_IV_BYTES + IMAGE_BYTES, GCM_TAG_BYTES, sealed + GCM_IV_BYTES, out);
+  if (rc == 0) rc = mbedtls_gcm_starts(&gcm, MBEDTLS_GCM_DECRYPT, sealed, GCM_IV_BYTES, nullptr, 0);
+  for (size_t done = 0; rc == 0 && done < IMAGE_BYTES;) {
+    size_t n = min(CHUNK, IMAGE_BYTES - done);  // a multiple of 16 but for the last
+    memcpy(in, sealed + GCM_IV_BYTES + done, n);
+    rc = mbedtls_gcm_update(&gcm, n, in, res);
+    memcpy(out + done, res, n);
+    done += n;
   }
+  if (rc == 0) rc = mbedtls_gcm_finish(&gcm, tag, sizeof tag);
+  // The tag says whether this was sealed with our key, and wasn't changed on the way
+  uint8_t diff = 0;
+  const uint8_t* want = sealed + GCM_IV_BYTES + IMAGE_BYTES;
+  for (size_t i = 0; i < GCM_TAG_BYTES; i++) diff |= tag[i] ^ want[i];
   mbedtls_gcm_free(&gcm);
   memset(key, 0, sizeof key);
-  return rc == 0;
+  free(in);
+  free(res);
+  if (rc != 0 || diff) {
+    // Which code this frame has, as the first characters of its token's hash: compare with
+    // the server's to tell a different code from a decryption problem (never the code itself)
+    Serial.printf("can't open: rc=%d, tag %s, code hash %.12s\n", rc, diff ? "differs" : "ok", accessTokenHash().c_str());
+    return false;
+  }
+  return true;
 }
 
 // ---- The code screen ---------------------------------------------------------------------
