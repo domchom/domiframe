@@ -41,7 +41,7 @@ function route(pathname) {
   if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/image$/))) return { fn: frameImage, params: { id: m[1] } };
   if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/code$/))) return { fn: frameCode, params: { id: m[1] } };
   if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/alerts$/))) return { fn: frameAlerts, params: { id: m[1] } };
-  if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/(?:info|preview|settings|restore|trash|pictures(?:\/[^/]+){0,2}|albums(?:\/[^/]+)?)$/))) {
+  if ((m = pathname.match(/^\/api\/frames\/([^/]+)\/(?:info|preview|settings|restore|trash|defaults|pictures(?:\/[^/]+){0,2}|albums(?:\/[^/]+)?)$/))) {
     return { fn: frameInfo, params: { id: m[1] } };
   }
   return null;

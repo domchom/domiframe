@@ -39,6 +39,9 @@ export const DEFAULT_SETTINGS = {
 
 export const emptyState = () => ({
   pictures: [], albums: [], current: null, since: null, seen: [], showNext: null, onDemand: false, bag: [], trash: [],
+  // The frame has had pictures (or the default ones are going up): no default pictures for it
+  // again. Part of the state, so a new frame code starts without it.
+  defaultsDone: false,
 });
 
 /** Older states lack newer fields. */
@@ -254,7 +257,7 @@ export function addPicture(inState, pic, now = Date.now()) {
     if (pictures.length - over.length <= MAX_PICTURES) break;
     if (p.id !== state.current) over.push(p.id);
   }
-  return removePictures({ ...state, pictures }, over, now);
+  return removePictures({ ...state, pictures, defaultsDone: true }, over, now);
 }
 
 /**

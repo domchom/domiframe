@@ -123,6 +123,7 @@ async function loadInfo() {
   showHang(info);
   showQueue(info);
   showSettings(info.settings);
+  addDefaults(info);
   if (hangChanged && source) scheduleRender(); // pictures are made for the new orientation
   if (photos.length > 1) showBatchNote();
 }
@@ -727,19 +728,20 @@ function effectiveFit(o, panel = framePanel(), src = source) {
  */
 function compose(o, w, h, other = null) {
   const panel = other ? other.panel : framePanel();
+  const src = other?.src || source;
   const at = other ? { ...other.pan } : pan;
   const work = document.createElement("canvas");
   work.width = w;
   work.height = h;
   const ctx = work.getContext("2d", { willReadFrequently: true });
-  const fit = effectiveFit(o, panel);
+  const fit = effectiveFit(o, panel, src);
   if (o.bg === "blur") {
     // Blur by shrinking to a few pixels and stretching back; fast and works in every browser
     const tiny = document.createElement("canvas");
     tiny.width = 24;
     tiny.height = Math.max(1, Math.round((24 * h) / w));
-    const k = Math.max(tiny.width / source.width, tiny.height / source.height);
-    tiny.getContext("2d").drawImage(source, (tiny.width - source.width * k) / 2, (tiny.height - source.height * k) / 2, source.width * k, source.height * k);
+    const k = Math.max(tiny.width / src.width, tiny.height / src.height);
+    tiny.getContext("2d").drawImage(src, (tiny.width - src.width * k) / 2, (tiny.height - src.height * k) / 2, src.width * k, src.height * k);
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(tiny, 0, 0, w, h);
     ctx.fillStyle = "rgba(0,0,0,.18)"; // a little darker, so the photo stands out
@@ -748,8 +750,8 @@ function compose(o, w, h, other = null) {
     ctx.fillStyle = o.bg;
     ctx.fillRect(0, 0, w, h);
   }
-  const scale = (fit === "cover" ? Math.max : Math.min)(w / source.width, h / source.height) * o.zoom;
-  const dw = source.width * scale, dh = source.height * scale;
+  const scale = (fit === "cover" ? Math.max : Math.min)(w / src.width, h / src.height) * o.zoom;
+  const dw = src.width * scale, dh = src.height * scale;
   // Bigger than the frame: keep it covering the frame. Smaller (zoomed out): keep it inside.
   const maxX = Math.abs(dw - w) / 2, maxY = Math.abs(dh - h) / 2;
   at.x = Math.max(-maxX, Math.min(maxX, at.x));
@@ -760,7 +762,7 @@ function compose(o, w, h, other = null) {
     $("preview").classList.toggle("draggable", !!canDrag);
   }
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(source, (w - dw) / 2 + at.x, (h - dh) / 2 + at.y, dw, dh);
+  ctx.drawImage(src, (w - dw) / 2 + at.x, (h - dh) / 2 + at.y, dw, dh);
   return ctx.getImageData(0, 0, w, h);
 }
 
@@ -1857,6 +1859,57 @@ async function sendBatch() {
     (sent ? (editing || upNext() ? " They reach the frame at its next check-in; press the button on the frame to update it now." : " They join the frame's rotation.") : "") +
     alsoNote(targets, failedIds), failed || failedIds.size ? "err" : "ok");
   if (!failed) clearEditor();
+}
+
+
+// ---- Default pictures ------------------------------------------------------------
+// A frame that has never had a picture gets three paintings, in a "Default" folder, the first
+// time its page is opened with its code: a new frame (or one given away) isn't blank. They're in
+// the public domain, from the Art Institute of Chicago (web/defaults/). Once per frame code: the
+// server lets one browser claim it, and a frame that has had any picture never gets them.
+
+const DEFAULT_PICTURES = ["great-wave.jpg", "bedroom.jpg", "grande-jatte.jpg"];
+let defaultsTried = false;
+
+async function addDefaults(info) {
+  if (defaultsTried || info.defaultsDone !== false || info.pictures.length || info.trash.length) return;
+  defaultsTried = true;
+  const claim = await api("defaults", { method: "POST" }).then((r) => r.ok && r.json()).catch(() => null);
+  if (!claim?.claimed) return;
+  const panel = framePanel(), portrait = framePortrait();
+  const { w, h } = sizeFor(panel, portrait);
+  const look = { ...PRESETS.default, fit: "auto", bg: "blur" };
+  const o = { ...look, portrait, zoom: 1 };
+  const sealed = async (blob) => new Blob([await seal(contentKey, blob)], { type: "application/octet-stream" });
+  try {
+    const r = await api("albums", jsonReq("POST", { name: await sealText(contentKey, "Default") }));
+    const album = r.ok ? (await r.json()).album.id : null;
+    for (const [i, name] of DEFAULT_PICTURES.entries()) {
+      const original = await (await fetch(`/defaults/${name}`)).blob();
+      const src = await createImageBitmap(original);
+      const idx = ditherToPalette(compose(o, w, h, { panel, pan: { x: 0, y: 0 }, src }).data, w, h, o);
+      const made = new ImageData(indicesToRGBA(idx), w, h);
+      const [preview, small] = await Promise.all([
+        toBlob(scaledPreview(800, made), "image/png"),
+        toBlob(scaledPreview(400, made), "image/jpeg", 0.85),
+      ]);
+      const edits = {
+        v: 3, panel, orientation: portrait ? "portrait" : "landscape", zoom: 1, pan: { x: 0, y: 0 }, look,
+        label: null, sign: null, caption: "", date: null, showDate: false, corner: "br",
+      };
+      const form = new FormData();
+      form.append("image", await sealed(pack(toPanelOrder(idx, w, h, panel))), "image.bin");
+      form.append("preview", await sealed(preview), "preview.bin");
+      form.append("thumb", await sealed(small), "thumb.bin");
+      form.append("original", await sealed(original), "original.bin");
+      form.append("edits", await sealText(contentKey, JSON.stringify(edits)));
+      form.append("queue", i === 0 ? "next" : "rotation"); // the first goes up at the next check-in
+      if (album) form.append("album", album);
+      await sendUpload({ path: "image", init: { method: "POST", body: form } });
+    }
+    msg("Added three paintings to start with, in the Default folder. Remove them whenever you like.", "ok");
+  } catch { /* what went up stays; the rest isn't tried again for this code */ }
+  loadInfo();
 }
 
 

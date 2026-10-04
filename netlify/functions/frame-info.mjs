@@ -20,6 +20,8 @@
 //   DELETE /api/frames/:id/trash  {ids} | {all: true}  -> delete pictures in the trash for good
 //   (pictures in the trash are deleted for good after TRASH_DAYS)
 //
+//   POST   /api/frames/:id/defaults                 -> { claimed }: true for the one browser that should add the
+//                                                      default pictures (web/defaults/) to a frame that has never had any
 //   POST   /api/frames/:id/albums  {name}           -> new folder (name sealed)
 //   PATCH  /api/frames/:id/albums/:album  {name}    -> rename
 //   DELETE /api/frames/:id/albums/:album?pictures=delete|keep
@@ -39,6 +41,7 @@ export const config = {
     "/api/frames/:id/info", "/api/frames/:id/preview", "/api/frames/:id/settings",
     "/api/frames/:id/pictures", "/api/frames/:id/pictures/:pic", "/api/frames/:id/pictures/:pic/:action",
     "/api/frames/:id/albums", "/api/frames/:id/albums/:album", "/api/frames/:id/restore", "/api/frames/:id/trash",
+    "/api/frames/:id/defaults",
   ],
 };
 
@@ -116,6 +119,17 @@ export default async (req, context) => {
       });
       await deletePictureFiles(id, removed);
       return json({ ok: true, removed: removed.length });
+    }
+
+    case "POST defaults": {
+      // Once per frame code, by whichever browser asks first: the server can't add them itself,
+      // since only someone with the code can seal pictures for the frame
+      let claimed = false;
+      await updateState(id, (s) => {
+        claimed = !s.defaultsDone && !s.pictures.length && !s.trash.length;
+        return claimed ? { ...s, defaultsDone: true } : null;
+      });
+      return json({ ok: true, claimed });
     }
 
     case "POST albums": {

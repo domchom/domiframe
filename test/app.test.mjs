@@ -334,6 +334,31 @@ test("a new frame code: only the device key can set it, the old code stops worki
   assert.equal((await f.opened(await f.call(`pictures/${pic.id}`))).length, 5);
 });
 
+test("default pictures: one browser adds them, once per frame code, and never to a frame that's had pictures", async () => {
+  const f = await newFrame("defaults");
+  const claimDefaults = async (auth = f.auth) => (await (await f.call("defaults", { method: "POST" }, auth)).json()).claimed;
+  assert.equal((await f.info()).defaultsDone, false);
+  // two browsers open the page at once: only one adds them
+  assert.deepEqual(await Promise.all([claimDefaults(), claimDefaults()]).then((c) => c.sort()), [false, true]);
+  assert.equal((await f.info()).defaultsDone, true);
+  // emptied out later: still not again
+  await f.upload(0x21);
+  await f.call("pictures", jsonBody("DELETE", { all: true }));
+  await f.call("trash", jsonBody("DELETE", { all: true }));
+  assert.equal(await claimDefaults(), false);
+
+  // a frame that got a picture before anyone opened its page never gets them
+  const g = await newFrame("defaults-late");
+  await g.upload(0x22);
+  assert.equal((await g.info()).defaultsDone, true);
+  assert.equal((await (await g.call("defaults", { method: "POST" })).json()).claimed, false);
+
+  // a new frame code starts over: the new owner gets them
+  const { code } = await claim("defaults", f.deviceKey);
+  const { auth } = await frameKeys("defaults", code);
+  assert.equal(await claimDefaults(auth), true);
+});
+
 test("pictures put aside with an old code are deleted once its time is up", async () => {
   const f = await newFrame("expire");
   const pic = await f.upload(0x11);
