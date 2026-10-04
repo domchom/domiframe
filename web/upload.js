@@ -1261,6 +1261,7 @@ async function thumbnailAll() {
 let skippedFiles = 0;
 function updateBatch() {
   showAlsoSend();
+  showUpNext();
   summarizeLooks();
   const n = photos.length;
   const batch = n > 1;
@@ -1462,6 +1463,25 @@ document.addEventListener("keydown", (e) => {
 });
 
 let frameInfo = null; // from loadInfo, for the batch note
+// ---- Up next: whether the first new photo goes up at the next check-in, ahead of the rotation --
+// (remembered on this device, as the app's Settings does)
+
+const upNext = () => !editing && $("up-next").checked;
+function showUpNext() {
+  $("up-next-row").hidden = $("up-next-tip").hidden = editing;
+  const many = photos.length > 1;
+  $("up-next-row").lastChild.textContent = many ? " Put the first up next" : " Put it up next";
+  $("up-next-tip").textContent = $("up-next").checked
+    ? `${many ? "The first goes" : "It goes"} up at the frame's next check-in, ahead of its rotation.`
+    : `${many ? "They come" : "It comes"} round in the frame's rotation.`;
+}
+try { $("up-next").checked = localStorage.getItem("domiframe:up-next") !== "0"; } catch {}
+$("up-next").addEventListener("change", () => {
+  try { localStorage.setItem("domiframe:up-next", $("up-next").checked ? "1" : "0"); } catch {}
+  showUpNext();
+  showBatchNote();
+});
+
 function showBatchNote() {
   if (!frameInfo) return;
   const { rotateHours } = frameInfo.settings;
@@ -1470,7 +1490,9 @@ function showBatchNote() {
   if (rotateHours === 0) {
     notes.push("This frame only changes when a new picture arrives, so only the first photo will show. Pick how often to change it in Frame settings below.");
   } else {
-    notes.push(`The first photo goes up at the frame's next check-in; the rest join the rotation, changing ${rotateLabel(rotateHours)}.`);
+    notes.push(upNext()
+      ? `The first photo goes up at the frame's next check-in; the rest join the rotation, changing ${rotateLabel(rotateHours)}.`
+      : `They join the rotation, changing ${rotateLabel(rotateHours)}.`);
   }
   if (photos.length > room) notes.push(`A frame keeps 200 pictures, so the ${photos.length - room} oldest will be removed.`);
   $("batch-note").textContent = notes.join(" ");
@@ -1760,15 +1782,18 @@ $("send").addEventListener("click", async () => {
       if (!packed) return;
       msg(editing ? "Saving…" : "Sending…");
       const targets = await alsoTargets();
-      await sendUpload(await prepareUpload());
+      const queue = upNext() ? "next" : "rotation";
+      await sendUpload(await prepareUpload(queue));
       const failedIds = new Set(targets.filter((t) => t.failed).map((t) => t.id));
       for (const t of targets.filter((t) => !t.failed)) {
         msg(`Sending to ${t.name}…`);
-        try { await sendUpload(await prepareFor(t, "next")); } catch { failedIds.add(t.id); }
+        try { await sendUpload(await prepareFor(t, queue)); } catch { failedIds.add(t.id); }
       }
       msg((editing
         ? "Saved. If it's on the frame, it redraws at the next check-in. Press the button on the frame to update it now."
-        : "Sent! The frame will show it at its next check-in; press the button on the frame to show it now. To change it later, select it above and press Edit.")
+        : queue === "next"
+          ? "Sent! The frame will show it at its next check-in; press the button on the frame to show it now. To change it later, select it above and press Edit."
+          : "Sent! It joins the frame's rotation. To change it later, select it above and press Edit.")
         + alsoNote(targets, failedIds), failedIds.size ? "err" : "ok");
       clearEditor();
     }
@@ -1814,7 +1839,7 @@ async function sendBatch() {
     for (const [n, i] of order.entries()) {
       msg(`${editing ? "Saving" : "Sending"} ${n + 1} of ${order.length}…`);
       if (!(await select(i))) { failed++; continue; }
-      const queue = started++ === 0 ? "next" : "rotation";
+      const queue = started++ === 0 && upNext() ? "next" : "rotation";
       const req = await prepareUpload(queue);
       const extras = [];
       for (const t of ready) extras.push(await prepareFor(t, queue));
@@ -1829,7 +1854,7 @@ async function sendBatch() {
   }
   const verb = editing ? "Saved" : "Sent";
   msg(`${verb} ${plural(sent, editing ? "picture" : "photo")}` + (failed ? `; ${failed} couldn't be opened or sent.` : ".") +
-    (sent ? " They reach the frame at its next check-in; press the button on the frame to update it now." : "") +
+    (sent ? (editing || upNext() ? " They reach the frame at its next check-in; press the button on the frame to update it now." : " They join the frame's rotation.") : "") +
     alsoNote(targets, failedIds), failed || failedIds.size ? "err" : "ok");
   if (!failed) clearEditor();
 }

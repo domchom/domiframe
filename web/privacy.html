@@ -49,14 +49,14 @@
         <li><b>Netlify</b> hosts the website and the server, and stores the data above. Like any web host, it handles your IP address and basic request details to deliver pages and may keep them in logs for a short time. See <a href="https://www.netlify.com/privacy/">Netlify's privacy policy</a>.</li>
         <li><b>Google Fonts</b>: the website loads its typefaces from Google, so your browser contacts Google when you open a page. See <a href="https://policies.google.com/privacy">Google's privacy policy</a>. The app doesn't use Google Fonts.</li>
         <li><b>Art Institute of Chicago</b>: in the app, Add Art shows public-domain paintings straight from the museum's image server, so the app contacts artic.edu when you open it. Nothing about you or your frames is sent. See the <a href="https://www.artic.edu/terms/privacy-policy">museum's privacy policy</a>.</li>
-        <li><b>Apple</b>: if you turn on alerts in the app, they're delivered by Apple's push notification service, which gets the alert's text (the frame's name and what's wrong) and your phone's push token. See <a href="https://www.apple.com/legal/privacy/">Apple's privacy policy</a>.</li>
+        <li><b>Apple</b>: if you turn on Sync codes with iCloud in the app, your frame codes are stored in iCloud Keychain, which Apple end-to-end encrypts so that not even Apple can read them. If you turn on alerts in the app, they're delivered by Apple's push notification service, which gets the alert's text (the frame's name and what's wrong) and your phone's push token. See <a href="https://www.apple.com/legal/privacy/">Apple's privacy policy</a>.</li>
       </ul>
       <p>No other service receives anything.</p>
 
       <h3>What stays on your device</h3>
       <ul>
         <li><b>Website:</b> frame IDs and codes you've opened (so you don't have to type them again), the light or dark setting, your name for signing and a few editor choices, in your browser's storage. Clearing your site data removes them.</li>
-        <li><b>App:</b> frame codes in the iOS Keychain, on this device only; the list of frames you've opened, your name for signing and a few editor choices in the app's own storage. Forgetting a frame under Manage Frames, or deleting the app, removes them.</li>
+        <li><b>App:</b> frame codes in the iOS Keychain, on this device only unless you turn on <b>Sync codes with iCloud</b> in the app's Settings (then also in iCloud Keychain, end-to-end encrypted by Apple, so your other devices get your frames); the list of frames you've opened, your name for signing and a few editor choices in the app's own storage. Removing a frame in the app deletes its code, from iCloud too if it's synced. Deleting the app removes the rest, though iOS can keep Keychain items after an app is deleted: remove your frames in the app first to be sure.</li>
         <li><b>Photos and camera:</b> the app uses the system photo picker, so it only sees the photos you choose. The camera is used only to scan an invite QR code; nothing it sees is saved or sent.</li>
       </ul>
 
