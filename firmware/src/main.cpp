@@ -6,9 +6,11 @@
 // redraw only if the picture changed -> deep sleep for as long as the server says
 // (X-Sleep-Minutes), so check-in times, quiet hours and picture rotation are set on the server.
 //
-// First boot (or hold KEY3 while resetting): opens a Wi-Fi setup portal
-// "DomiFrame-Setup" (password shown on the screen) where you enter the home Wi-Fi plus the
-// frame ID and device key.
+// Wi-Fi setup (portal.cpp): on first boot, when someone switches the frame on (or resets it, or
+// presses KEY1) and it can't reach its Wi-Fi, or with KEY3 held while resetting, the frame opens
+// its own network "DomiFrame-Setup" and shows a QR code to join it (and its password). The phone
+// gets one page: pick the Wi-Fi, type its password. The frame ID and device key go in there too
+// on first setup, then stay out of the way.
 //
 // Frame code: the frame makes its own random code (like K7PX-92QD-M4TR-8WZN) and shows it on
 // its screen; people type it on the website to send pictures. Pictures are sealed in their
@@ -24,7 +26,6 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
-#include <WiFiManager.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <Preferences.h>
@@ -41,6 +42,7 @@
 #include <esp_ota_ops.h>
 #include <qrcode.h>  // ESP-IDF's QR encoder
 #include "config.h"
+#include "portal.h"
 #include "fw_key.h"
 #include "pixel_font.h"  // made by the app repo's scripts/make-pixel-font.py, as web/pixelfont.js
 
@@ -616,6 +618,44 @@ void roundFill(int x, int y, int w, int h, int r, Pick pick) {
 int paleBlue(int x, int y) { return (y & 1) == 0 && (x & 3) == (y & 2) ? INK_BLUE : INK_WHITE; }
 int inkBlack(int, int) { return INK_BLACK; }
 
+// The code and setup screens' header: the icon, the wordmark and what it is, the inks at the
+// right, over a rule at y = 92
+void drawBrandHeader(int w) {
+  roundFill(MARGIN, 24, 44, 36, 5, inkBlack);
+  inkRect(MARGIN + 3, 27, 38, 30, INK_WHITE);
+  drawArt(ART_PAINTING, 12, MARGIN + 6, 30, 2);
+  pixelWord("DomiFrame", MARGIN + 58, 24, 3, INK_BLACK);
+  inkText("COLOR E-PAPER PHOTO FRAMES", MARGIN + 58, 74, &PlexLabel, INK_BLACK);
+  const int strip[6] = {INK_BLACK, INK_BLUE, INK_GREEN, INK_YELLOW, INK_RED, INK_WHITE};
+  int sx = w - MARGIN - 6 * 16 - 4;
+  inkRect(sx, 31, 6 * 16 + 4, 16, INK_BLACK);  // centred on the wordmark
+  for (int i = 0; i < 6; i++) inkRect(sx + 2 + i * 16, 33, 16, 12, strip[i]);
+  inkRect(MARGIN, 92, w - 2 * MARGIN, 2, INK_BLACK);
+}
+
+// The QR code made by makeQr, in a card under a blue bar with a label, with blue corner marks
+// and a dithered shadow: (qrSize + 4) * QR_MODULE + 24 wide, 30 more tall
+void drawQrCard(int cardX, int cardY, const char* label) {
+  int qside = (qrSize + 4) * QR_MODULE, cardW = qside + 24, cardH = qside + 24 + 30;
+  roundFill(cardX + CARD_SHADOW, cardY + CARD_SHADOW, cardW, cardH, 10,
+            [](int x, int y) { return (x + y) & 1 ? -1 : (int)INK_BLACK; });
+  roundFill(cardX, cardY, cardW, cardH, 10, [&](int x, int y) {
+    bool edge = x < cardX + 2 || x >= cardX + cardW - 2 || y < cardY + 2 || y >= cardY + cardH - 2;
+    return edge || y < cardY + 30 ? (int)INK_BLUE : (int)INK_WHITE;
+  });
+  inkText(label, cardX + (cardW - textWidth(label, &PlexLabel)) / 2, cardY + 21, &PlexLabel, INK_WHITE);
+  int qx = cardX + 12, qy = cardY + 30 + 12;
+  for (int r = 0; r < qrSize; r++)
+    for (int c = 0; c < qrSize; c++)
+      if (qrDots[r][c]) inkRect(qx + (c + 2) * QR_MODULE, qy + (r + 2) * QR_MODULE, QR_MODULE, QR_MODULE, INK_BLACK);
+  const int L = 18, T = 4, x1 = qx - 2, y1 = qy - 2, x2 = qx + qside + 2, y2 = qy + qside + 2;
+  const int corners[4][4] = {{x1, y1, 1, 1}, {x2, y1, -1, 1}, {x1, y2, 1, -1}, {x2, y2, -1, -1}};
+  for (auto& k : corners) {
+    inkRect(k[2] > 0 ? k[0] : k[0] - L, k[3] > 0 ? k[1] : k[1] - T, L, T, INK_BLUE);
+    inkRect(k[2] > 0 ? k[0] : k[0] - T, k[3] > 0 ? k[1] : k[1] - L, T, L, INK_BLUE);
+  }
+}
+
 void showCodeScreen() {
   // The QR code opens the frame's page with the code filled in. It's after the #, which
   // browsers never send to the server.
@@ -623,18 +663,7 @@ void showCodeScreen() {
   bool qr = makeQr(link.c_str()) > 0;
   drawScreen([&] {
     int w = screenW(), h = screenH();
-
-    // Header: the icon, the wordmark and what it is, the inks at the right, over a rule
-    roundFill(MARGIN, 24, 44, 36, 5, inkBlack);
-    inkRect(MARGIN + 3, 27, 38, 30, INK_WHITE);
-    drawArt(ART_PAINTING, 12, MARGIN + 6, 30, 2);
-    pixelWord("DomiFrame", MARGIN + 58, 24, 3, INK_BLACK);
-    inkText("COLOR E-PAPER PHOTO FRAMES", MARGIN + 58, 74, &PlexLabel, INK_BLACK);
-    const int strip[6] = {INK_BLACK, INK_BLUE, INK_GREEN, INK_YELLOW, INK_RED, INK_WHITE};
-    int sx = w - MARGIN - 6 * 16 - 4;
-    inkRect(sx, 31, 6 * 16 + 4, 16, INK_BLACK);  // centred on the wordmark
-    for (int i = 0; i < 6; i++) inkRect(sx + 2 + i * 16, 33, 16, 12, strip[i]);
-    inkRect(MARGIN, 92, w - 2 * MARGIN, 2, INK_BLACK);
+    drawBrandHeader(w);
 
     bool wide = w > h;
     int qside = qr ? (qrSize + 4) * QR_MODULE : 0;
@@ -689,24 +718,7 @@ void showCodeScreen() {
     int cardY = 104 + ex * 2 / 5;
     if (qr) {
       if (!wide) cardY = y + 28;
-      roundFill(cardX + CARD_SHADOW, cardY + CARD_SHADOW, cardW, cardH, 10,
-                [](int x, int y) { return (x + y) & 1 ? -1 : (int)INK_BLACK; });
-      roundFill(cardX, cardY, cardW, cardH, 10, [&](int x, int y) {
-        bool edge = x < cardX + 2 || x >= cardX + cardW - 2 || y < cardY + 2 || y >= cardY + cardH - 2;
-        return edge || y < cardY + 30 ? (int)INK_BLUE : (int)INK_WHITE;
-      });
-      const char* label = "SCAN TO OPEN";
-      inkText(label, cardX + (cardW - textWidth(label, &PlexLabel)) / 2, cardY + 21, &PlexLabel, INK_WHITE);
-      int qx = cardX + 12, qy = cardY + 30 + 12;
-      for (int r = 0; r < qrSize; r++)
-        for (int c = 0; c < qrSize; c++)
-          if (qrDots[r][c]) inkRect(qx + (c + 2) * QR_MODULE, qy + (r + 2) * QR_MODULE, QR_MODULE, QR_MODULE, INK_BLACK);
-      const int L = 18, T = 4, x1 = qx - 2, y1 = qy - 2, x2 = qx + qside + 2, y2 = qy + qside + 2;
-      const int corners[4][4] = {{x1, y1, 1, 1}, {x2, y1, -1, 1}, {x1, y2, 1, -1}, {x2, y2, -1, -1}};
-      for (auto& k : corners) {
-        inkRect(k[2] > 0 ? k[0] : k[0] - L, k[3] > 0 ? k[1] : k[1] - T, L, T, INK_BLUE);
-        inkRect(k[2] > 0 ? k[0] : k[0] - T, k[3] > 0 ? k[1] : k[1] - L, T, L, INK_BLUE);
-      }
+      drawQrCard(cardX, cardY, "SCAN TO OPEN");
     }
 
     // How to use it, by a phone: level with the shelf, so the bottom reads as one band
@@ -729,6 +741,55 @@ void showCodeScreen() {
   });
   etag = "";  // the picture comes back at the next wake
   saveString("etag", etag);
+}
+
+// While the setup page is open: a QR code that joins the frame's own network (a phone's camera
+// offers to join it), the network's name and password to type instead, and what comes next.
+// note: what went wrong with the last try, if anything.
+void showSetupScreen(const String& apPassword, const String& note = "") {
+  String join = "WIFI:T:WPA;S:" SETUP_AP_NAME ";P:" + apPassword + ";;";
+  bool qr = makeQr(join.c_str()) > 0;
+  drawScreen([&] {
+    int w = screenW(), h = screenH();
+    drawBrandHeader(w);
+
+    bool wide = w > h;
+    int qside = qr ? (qrSize + 4) * QR_MODULE : 0;
+    int cardW = qside + 24;
+    int cardX = wide ? w - MARGIN - cardW - CARD_SHADOW : (w - cardW) / 2;
+    int colW = (qr && wide ? cardX - 30 : w - MARGIN) - MARGIN;
+    int ex = wide ? max(0, h - 480) : 0;  // room to spare on the 13.3" landscape
+
+    int y = 134 + (wide ? ex * 2 / 5 : max(0, h - 760) / 2);
+    inkText("Set up Wi-Fi", MARGIN, y, &PlexTitle, INK_BLACK);
+    if (note.length()) {
+      // Too long for one line (a long network name): the name, in quotes, goes on a second
+      int q = note.indexOf('"');
+      if (textWidth(note.c_str(), &PlexBody) > colW && q > 0) {
+        inkText(note.substring(0, q - 1).c_str(), MARGIN, y += 32, &PlexBody, INK_RED);
+        inkText(note.substring(q).c_str(), MARGIN, y += 26, &PlexBody, INK_RED);
+      } else {
+        inkText(note.c_str(), MARGIN, y += 32, &PlexBody, INK_RED);
+      }
+    }
+
+    inkText("1  JOIN THE FRAME'S WI-FI", MARGIN, y += 40 + ex / 10, &PlexLabel, INK_RED);
+    inkText(qr ? "Scan the code with your phone's camera," : "On your phone, join this network:", MARGIN, y += 30,
+            &PlexBody, INK_BLACK);
+    if (qr) inkText("or join this network in Wi-Fi settings:", MARGIN, y += 26, &PlexBody, INK_BLACK);
+    roundFill(MARGIN, y += 12, colW, 72, 7, paleBlue);
+    inkText("NETWORK", MARGIN + 16, y + 29, &PlexLabel, INK_BLACK);
+    inkText(SETUP_AP_NAME, MARGIN + 124, y + 30, &PlexIdM, INK_BLACK);
+    inkText("PASSWORD", MARGIN + 16, y + 59, &PlexLabel, INK_BLACK);
+    inkText(apPassword.c_str(), MARGIN + 124, y + 60, &PlexIdM, INK_BLACK);
+    y += 72;
+
+    inkText("2  PICK YOUR WI-FI", MARGIN, y += 36 + ex / 10, &PlexLabel, INK_RED);
+    inkText("A setup page opens on your phone.", MARGIN, y += 30, &PlexBody, INK_BLACK);
+    inkText("Choose your Wi-Fi and type its password.", MARGIN, y += 26, &PlexBody, INK_BLACK);
+
+    if (qr) drawQrCard(cardX, wide ? 104 + ex * 2 / 5 : y + 34, "SCAN TO JOIN");
+  });
 }
 
 void secureClient(WiFiClientSecure& client) {
@@ -761,81 +822,6 @@ int registerCode() {
   return code;
 }
 
-bool runSetupPortal() {
-  // A fresh password each time, shown only on the screen: nobody nearby can join the portal
-  // (and change where the frame connects) without seeing the frame.
-  String apPassword = randomChars(8);
-  String joinLine = "password " + apPassword + " to set me up.";
-  showMessage("Wi-Fi setup", "On your phone, join \"" SETUP_AP_NAME "\",", joinLine.c_str());
-
-  WiFiManager wm;
-  WiFiManagerParameter pId("id", "Frame ID", frameId.c_str(), 32);
-  // Never shown back: anyone who joins the portal could read it. Blank keeps the saved key.
-  WiFiManagerParameter pKey("key", deviceKey.isEmpty() ? "Device key" : "Device key (leave blank to keep it)", "", 64);
-  // WiFiManager only has text fields: a hidden one holds the value, a dropdown fills it in.
-  WiFiManagerParameter pOrient("orient", "", orientation.c_str(), 10, "type='hidden'");
-  bool portrait = orientation == "portrait";
-  String pickHtml = String("<br><label for='orientPick'>How the frame hangs</label>"
-                           "<select id='orientPick' onchange=\"document.getElementById('orient').value=this.value\">"
-                           "<option value='landscape'") + (portrait ? "" : " selected") + ">Landscape (wide)</option>"
-                           "<option value='portrait'" + (portrait ? " selected" : "") + ">Portrait (tall)</option></select>";
-  WiFiManagerParameter pOrientPick(pickHtml.c_str());
-  // A wiped frame, or one given a new code by mistake, can go back to the code it had. Like the
-  // device key, never shown back.
-  WiFiManagerParameter pCode("code", frameCode.isEmpty() ? "Frame code, if it had one before (keeps its pictures)"
-                                                         : "Frame code (leave blank to keep it)",
-                             "", 24, "autocomplete='off' autocapitalize='characters' spellcheck='false'");
-  WiFiManagerParameter pNewCode("newcode", "", "", 2, "type='hidden'");
-  WiFiManagerParameter pNewCodePick(
-      "<br><label><input type='checkbox' style='width:auto' "
-      "onchange=\"document.getElementById('newcode').value=this.checked?'1':''\"> "
-      "Make a new frame code. The old code stops working and its pictures are put away: "
-      "type the old code here again within 30 days to get them back.</label>");
-  wm.addParameter(&pId);
-  wm.addParameter(&pKey);
-  wm.addParameter(&pOrientPick);
-  wm.addParameter(&pOrient);
-  wm.addParameter(&pCode);
-  if (!frameCode.isEmpty()) {
-    wm.addParameter(&pNewCodePick);
-    wm.addParameter(&pNewCode);
-  }
-  wm.setConfigPortalTimeout(SETUP_PORTAL_TIMEOUT_S);
-  wm.setBreakAfterConfig(true);
-
-  bool ok = wm.startConfigPortal(SETUP_AP_NAME, apPassword.c_str());
-  String newId = pId.getValue();
-  newId.trim();
-  bool wantNewCode = String(pNewCode.getValue()) == "1";
-  if (newId.length() && newId != frameId) {
-    frameId = newId;
-    saveString("id", frameId);
-    wantNewCode = true;  // the code's keys are tied to the frame ID
-  }
-  String typed = tidyCode(pCode.getValue());
-  if (typed.length() && typed != frameCode) {
-    saveCode(typed, true);  // registered once we're online
-    etag = "";
-  } else if (wantNewCode && typed.isEmpty()) {
-    saveCode("", false);  // made (and registered) once we're online
-  }
-  if (strlen(pKey.getValue())) {
-    deviceKey = pKey.getValue();
-    saveString("key", deviceKey);
-  }
-  String o = pOrient.getValue();
-  if (o == "landscape" || o == "portrait") {
-    orientation = o;
-    saveString("orient", orientation);
-    saveOrientationPending(true);  // tell the server at the next check-in
-  }
-  rtcChannel = 0;  // maybe a new network
-  // force a redraw after setup
-  etag = "";
-  saveString("etag", etag);
-  return ok && WiFi.status() == WL_CONNECTED;
-}
-
 bool waitForWifi(uint32_t ms) {
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < ms) delay(50);
@@ -849,24 +835,95 @@ void rememberAccessPoint() {
   rtcChannel = WiFi.channel();
 }
 
-bool connectWifi() {
-  // RAM only: never rewrite the network WiFiManager saved, on every wake, with a pinned AP.
-  WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
+// The Wi-Fi network the frame joins, saved by the setup page. Frames first set up by older
+// firmware (with WiFiManager) have it in the Wi-Fi driver's own storage instead.
+// Needs Wi-Fi started (WiFi.mode).
+bool savedWifi(String& ssid, String& pass) {
+  prefs.begin("domiframe", true);
+  ssid = prefs.getString("wifiSsid", "");
+  pass = prefs.getString("wifiPass", "");
+  prefs.end();
+  if (ssid.length()) return true;
   wifi_config_t conf;
   if (esp_wifi_get_config(WIFI_IF_STA, &conf) != ESP_OK || !conf.sta.ssid[0]) return false;
-  char ssid[33] = {0}, pass[65] = {0};
-  memcpy(ssid, conf.sta.ssid, 32);
-  memcpy(pass, conf.sta.password, 64);
+  char s[33] = {0}, p[65] = {0};
+  memcpy(s, conf.sta.ssid, 32);
+  memcpy(p, conf.sta.password, 64);
+  ssid = s;
+  pass = p;
+  return true;
+}
+
+// The setup page (portal.cpp), with the setup screen up: returns true once the frame has joined
+// a network, which it keeps, along with anything changed under the page's frame details.
+bool runSetupPortal() {
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);  // the radio on first: it's what makes the random password truly random
+  // A fresh password each time, shown only on the screen: nobody nearby can join the frame's
+  // network (and change where the frame connects) without seeing the frame.
+  String apPassword = randomChars(8);
+
+  PortalSettings in;
+  in.frameId = frameId;
+  in.hasKey = !deviceKey.isEmpty();
+  in.hasCode = !frameCode.isEmpty();
+  in.orientation = orientation;
+  savedWifi(in.savedSsid, in.savedPass);
+
+  showSetupScreen(apPassword);
+  etag = "";  // the setup screen covers the picture: it comes back at the next check-in
+  saveString("etag", etag);
+  PortalResult out;
+  bool ok = runPortal(SETUP_AP_NAME, apPassword.c_str(), in, out, SETUP_PORTAL_TIMEOUT_S,
+                      [&](const String& note) { showSetupScreen(apPassword, note); });
+  if (!ok) return false;
+
+  prefs.begin("domiframe", false);
+  prefs.putString("wifiSsid", out.ssid);
+  prefs.putString("wifiPass", out.pass);
+  prefs.end();
+  rtcChannel = 0;  // a new network, maybe
+  rememberAccessPoint();
+
+  bool wantNewCode = out.newCode;
+  if (out.frameId.length() && out.frameId != frameId) {
+    frameId = out.frameId;
+    saveString("id", frameId);
+    wantNewCode = true;  // the code's keys are tied to the frame ID
+  }
+  String typed = tidyCode(out.code.c_str());
+  if (typed.length() && typed != frameCode) {
+    saveCode(typed, true);  // registered below, now that it's online
+  } else if (wantNewCode && typed.isEmpty()) {
+    saveCode("", false);  // made (and registered) below
+  }
+  if (out.deviceKey.length()) {
+    deviceKey = out.deviceKey;
+    saveString("key", deviceKey);
+  }
+  if ((out.orientation == "landscape" || out.orientation == "portrait") && out.orientation != orientation) {
+    orientation = out.orientation;
+    saveString("orient", orientation);
+    saveOrientationPending(true);  // tell the server at the next check-in
+  }
+  return true;
+}
+
+bool connectWifi() {
+  // RAM only: never rewrite the saved network, on every wake, with a pinned AP.
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  String ssid, pass;
+  if (!savedWifi(ssid, pass)) return false;
 
   // Fast path: straight to last time's access point and channel
   if (rtcChannel > 0) {
-    WiFi.begin(ssid, pass, rtcChannel, rtcBssid);
+    WiFi.begin(ssid.c_str(), pass.c_str(), rtcChannel, rtcBssid);
     if (waitForWifi(5000)) return true;
     WiFi.disconnect();
     rtcChannel = 0;
   }
-  WiFi.begin(ssid, pass);  // scan: the router may have moved channel or been replaced
+  WiFi.begin(ssid.c_str(), pass.c_str());  // scan: the router may have moved channel or been replaced
   if (!waitForWifi(20000)) return false;
   rememberAccessPoint();
   return true;
@@ -1134,6 +1191,15 @@ bool batteryFlat(int mv) {
   return nowFlat;
 }
 
+// This wake is from someone at the frame: the slide switch, the reset button or KEY1. Not a
+// timer, nor a restart after an update or a brownout.
+bool someoneThere() {
+  esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+  if (cause == ESP_SLEEP_WAKEUP_EXT1) return true;
+  esp_reset_reason_t r = esp_reset_reason();
+  return cause == ESP_SLEEP_WAKEUP_UNDEFINED && (r == ESP_RST_POWERON || r == ESP_RST_EXT);
+}
+
 void goToSleep() {
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
@@ -1181,8 +1247,15 @@ void setup() {
   }
 
   bool online = wantSetup ? runSetupPortal() : connectWifi();
+  // Someone's at the frame (just switched on or reset, or pressed KEY1) and it can't reach its
+  // Wi-Fi: it has probably moved, or been given to someone. Open setup rather than waiting
+  // quietly. Timer wakes keep the picture up and retry, less often each time.
+  if (!online && !wantSetup && someoneThere()) {
+    wantSetup = true;
+    online = runSetupPortal();
+  }
   if (!online) {
-    if (wantSetup) showMessage("Setup timed out", "Press reset to try again.");
+    if (wantSetup) showMessage("Not on Wi-Fi yet", "Switch the frame off and on again", "to set up Wi-Fi.");
     // Otherwise keep the current picture and retry at the next wake.
     sleepAfterFailedCheckIn();
     goToSleep();

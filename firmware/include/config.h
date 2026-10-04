@@ -57,6 +57,7 @@
 #define BAT_ADC_ENABLE_PIN 6 // A5, HIGH while measuring
 #define BAT_SCALE 7.16f      // volts = raw / 4096 * BAT_SCALE
 
-// Wi-Fi setup portal
+// Wi-Fi setup (portal.cpp): the frame's own network, and how long the setup page stays open
+// after it was last used
 #define SETUP_AP_NAME "DomiFrame-Setup"
 #define SETUP_PORTAL_TIMEOUT_S 600
