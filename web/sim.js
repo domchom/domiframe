@@ -1,6 +1,7 @@
 import { PALETTE, PANELS } from "/dither.js";
 import { frameKeys, unseal, SEAL_OVERHEAD } from "/seal.js";
 import { ask } from "/dialog.js";
+import { layout, CAP, CODE_GLYPHS, CODE_W, CODE_H } from "/pixelfont.js";
 
 const $ = (id) => document.getElementById(id);
 // Everything is drawn on a "panel" canvas in the panel's own pixel layout, exactly as the
@@ -96,12 +97,12 @@ function showUploadLink(id) {
   if (!a.hidden) a.href = `/f/${id}#k=${frameCode(id)}`;
 }
 
-// The firmware's showCodeScreen(): the code in two big lines, the frame ID under it, and a QR
-// code that opens the frame's page with the code filled in (after the #, so it's never sent to
-// the server): beside them on a wide screen, under them on a tall one
-const showCode = (id) => screen(({ w, h, rect, text, width, header, footer }) => {
+// The firmware's showCodeScreen(): the code in four cards (digits blue, letters black, each
+// character drawn to differ from its look-alikes), the frame ID under them, and a QR code that
+// opens the frame's page with the code filled in (after the #, so it's never sent to the server),
+// as a card beside them on a wide screen, under them on a tall one
+const showCode = (id) => screen(({ w, h, rect, text, width, header, footer, card, codeGroup }) => {
   const code = frameCode(id), qrText = `${location.origin}/f/${id}#k=${code}`;
-  const split = code.length === 19;
   header();
   let qr = null;
   if (window.qrcode) {
@@ -109,22 +110,26 @@ const showCode = (id) => screen(({ w, h, rect, text, width, header, footer }) =>
     qr.addData(qrText);
     qr.make();
   }
-  const foot = footer(qr ? "Scan with a phone camera, or" : `Enter both at ${location.host},`,
-    qr ? `enter both at ${location.host}.` : "under My frame.");
-  text("FRAME CODE", MARGIN, HEAD + 44, MONO_9, 3);
-  let y = HEAD + 94;
-  text(split ? code.slice(0, 9) : code, MARGIN, y, MONO_24, 0);
-  if (split) text(code.slice(10), MARGIN, (y += 48), MONO_24, 0);
+  const foot = footer(qr ? "Scan it with a phone's camera, or enter" : `Enter both at ${location.host},`,
+    qr ? `the code and ID at ${location.host}.` : "under My frame.");
+  text("FRAME CODE", MARGIN, HEAD + 36, MONO_9, 3);
+  const groups = code.split("-");
+  const top = HEAD + 50;
+  groups.forEach((g, i) => {
+    const x = MARGIN + (i % 2) * (CARD_W + 16), y = top + Math.floor(i / 2) * (CARD_H + 14);
+    card(x, y, CARD_W, CARD_H);
+    codeGroup(g, x + CARD_PAD, y + CARD_PAD);
+  });
+  let y = top + 2 * CARD_H + 14;
   const wide = w > h, n = qr ? qr.getModuleCount() : 0, side = qr ? (n + 8) * QR_MODULE + 6 : 0;
   const room = (qr && wide ? w - MARGIN - side - 24 : w - MARGIN) - MARGIN;
-  text("FRAME ID", MARGIN, (y += 48), MONO_9, 3);
+  text("FRAME ID", MARGIN, (y += 36), MONO_9, 3);
   const idFont = [MONO_18, MONO_12, MONO_9].find((f) => width(id, f) <= room) || MONO_9;
   text(id, MARGIN, (y += 34), idFont, 0);
   if (qr) {
-    const top = wide ? HEAD : y + 20;
-    const x0 = wide ? w - MARGIN - side : Math.floor((w - side) / 2), y0 = top + Math.floor((foot - top - side) / 2);
-    rect(x0, y0, side, side, 0);
-    rect(x0 + 3, y0 + 3, side - 6, side - 6, 1);
+    const qtop = wide ? HEAD : y + 20;
+    const x0 = wide ? w - MARGIN - side - CARD_SHADOW : Math.floor((w - side) / 2), y0 = qtop + Math.floor((foot - qtop - side) / 2);
+    card(x0, y0, side, side);
     for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
       if (qr.isDark(r, c)) rect(x0 + 3 + (c + 4) * QR_MODULE, y0 + 3 + (r + 4) * QR_MODULE, QR_MODULE, QR_MODULE, 0);
     }
@@ -161,6 +166,9 @@ async function refresh(paint) {
 // upright however the frame hangs (rotation 1 when turned: the text's top is the panel's right
 // edge). Fonts stand in for the firmware's Adafruit GFX ones at about the same size.
 const MARGIN = 40, HEAD = 88, QR_MODULE = 5;
+// The code screen: each code character CODE_W×CODE_H dots of CODE_SCALE units, in four cards
+const CODE_SCALE = 6, CODE_BOLD = 2, CARD_PAD = 12, CARD_SHADOW = 6;
+const CARD_W = 4 * CODE_W * CODE_SCALE + 3 * CODE_SCALE + CODE_BOLD + 2 * CARD_PAD, CARD_H = CODE_H * CODE_SCALE + 2 * CARD_PAD;
 const SANS_18 = "bold 34px Helvetica, Arial, sans-serif", SANS_12 = "24px Helvetica, Arial, sans-serif";
 const MONO_9 = "bold 18px 'Courier New', monospace", MONO_12 = "bold 23px 'Courier New', monospace";
 const MONO_18 = "bold 35px 'Courier New', monospace", MONO_24 = "bold 47px 'Courier New', monospace";
@@ -176,15 +184,39 @@ const screen = (paint) => refresh(() => {
   const rect = (x, y, rw, rh, ink) => { c.fillStyle = rgb(ink); c.fillRect(x * k, y * k, rw * k, rh * k); };
   const text = (t, x, y, f, ink) => { c.font = font(f); c.fillStyle = rgb(ink); c.fillText(t, x * k, y * k); };
   const width = (t, f) => { c.font = f; return c.measureText(t).width; };
-  // The wordmark with a red offset shadow and the six inks beside it, over a rule
+  // A 50% checkerboard of one ink: the site's dithered shadows
+  const dither = (x, y, rw, rh, ink) => {
+    for (let yy = y; yy < y + rh; yy++) for (let xx = x; xx < x + rw; xx++) if ((xx + yy) % 2 === 0) rect(xx, yy, 1, 1, ink);
+  };
+  // Pixel letters (web/pixelfont.js), s units a dot, with a red dithered shadow one dot down
+  // and right; returns their width
+  const pixelWord = (t, x, top, s, ink) => {
+    const rows = layout(t);
+    rows.forEach((r, y) => [...r].forEach((d, x2) => d === "#" && dither(x + (x2 + 1) * s, top + (y + 1) * s, s, s, 3)));
+    rows.forEach((r, y) => [...r].forEach((d, x2) => d === "#" && rect(x + x2 * s, top + y * s, s, s, ink)));
+    return rows[0].length * s;
+  };
+  // The wordmark and the six inks beside it, over a rule
   const header = () => {
-    text("DomiFrame", MARGIN + 2, 68, SANS_18, 3);
-    text("DomiFrame", MARGIN, 66, SANS_18, 0);
-    const x = MARGIN + Math.ceil(width("DomiFrame", SANS_18)) + 20;
-    rect(x - 2, 44, 6 * 16 + 4, 16, 0);
-    [0, 4, 5, 2, 3, 1].forEach((ink, i) => rect(x + i * 16, 46, 16, 12, ink));
+    const x = MARGIN + pixelWord("DomiFrame", MARGIN, 34, 3, 0) + 22;
+    rect(x - 2, 41, 6 * 16 + 4, 16, 0);
+    [0, 4, 5, 2, 3, 1].forEach((ink, i) => rect(x + i * 16, 43, 16, 12, ink));
     rect(MARGIN, HEAD - 3, w - 2 * MARGIN, 3, 0);
   };
+  // A card on the page: a black border on white, with a dithered shadow
+  const card = (x, y, cw, ch) => {
+    dither(x + CARD_SHADOW, y + CARD_SHADOW, cw, ch, 0);
+    rect(x, y, cw, ch, 0);
+    rect(x + 3, y + 3, cw - 6, ch - 6, 1);
+  };
+  // Four of the frame code's characters, CODE_SCALE units a dot (CODE_BOLD wider, so the strokes
+  // are heavier than the gaps): digits in blue, letters in black
+  const codeGroup = (g, x, top) => [...g].forEach((ch, i) => {
+    const rows = CODE_GLYPHS[ch] || [];
+    const ink = /[0-9]/.test(ch) ? 4 : 0;
+    rows.forEach((r, y) => [...r].forEach((d, x2) => d === "#" &&
+      rect(x + i * (CODE_W + 1) * CODE_SCALE + x2 * CODE_SCALE, top + y * CODE_SCALE, CODE_SCALE + CODE_BOLD, CODE_SCALE, ink)));
+  });
   // Two lines at the bottom under a thin rule; returns where the rule is
   const footer = (line1, line2) => {
     const y = h - MARGIN - 62;
@@ -194,7 +226,7 @@ const screen = (paint) => refresh(() => {
     return y;
   };
   rect(0, 0, w, h, 1);
-  paint({ w, h, rect, text, width, header, footer });
+  paint({ w, h, rect, text, width, header, footer, card, codeGroup });
   ctx.save();
   if (turned()) ctx.setTransform(0, 1, -1, 0, W, 0);
   ctx.drawImage(m, 0, 0);

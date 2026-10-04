@@ -41,6 +41,7 @@
 #include <qrcode.h>  // ESP-IDF's QR encoder
 #include "config.h"
 #include "fw_key.h"
+#include "pixel_font.h"  // made by the app repo's scripts/make-pixel-font.py, as web/pixelfont.js
 
 // ---- Screen -----------------------------------------------------------------
 // W x H is the panel's own pixel layout, which is the order the server sends pictures in.
@@ -60,7 +61,6 @@ EPaper epaper;
 #include <Fonts/FreeMonoBold9pt7b.h>
 #include <Fonts/FreeMonoBold12pt7b.h>
 #include <Fonts/FreeMonoBold18pt7b.h>
-#include <Fonts/FreeMonoBold24pt7b.h>
 #define PANEL_ID "7.3"
 static const int W = 800, H = 480;
 static const bool NATIVE_PORTRAIT = false;
@@ -267,14 +267,72 @@ void drawPacked(const uint8_t* buf) {
 enum Ink { INK_BLACK, INK_WHITE, INK_YELLOW, INK_RED, INK_BLUE, INK_GREEN };  // PALETTE order
 static const int MARGIN = 40, HEAD = 88;               // HEAD: the rule under the wordmark
 
+// A 50% checkerboard of one ink: the site's dithered shadows
+void inkDither(int x, int y, int w, int h, int ink) {
+  for (int yy = y; yy < y + h; yy++)
+    for (int xx = x + ((x + yy) & 1); xx < x + w; xx += 2) inkRect(xx, yy, 1, 1, ink);
+}
+
+const PfGlyph* wordGlyph(char c) {
+  for (const PfGlyph& g : PF_WORD) if (g.c == c) return &g;
+  return nullptr;
+}
+
+// The wordmark's pixel letters (pixel_font.h), s units a dot, with a red dithered shadow one
+// dot down and right, as on the website and in the app; returns their width
+int pixelWord(const char* text, int x, int top, int s, int ink) {
+  for (int pass = 0; pass < 2; pass++) {  // the shadow, then the letters over it
+    int cx = x;
+    for (const char* p = text; *p; p++) {
+      const PfGlyph* g = wordGlyph(*p);
+      if (!g) continue;
+      for (int r = 0; r < PF_CAP; r++)
+        for (int c = 0; c < g->w; c++)
+          if (g->rows[r][c] == '#') {
+            if (pass == 0) inkDither(cx + (c + 1) * s, top + (r + 1) * s, s, s, INK_RED);
+            else inkRect(cx + c * s, top + r * s, s, s, ink);
+          }
+      cx += (g->w + PF_SPACING) * s;
+    }
+    if (pass == 1) return cx - PF_SPACING * s - x;
+  }
+  return 0;
+}
+
 void drawHeader(int w) {
-  inkText("DomiFrame", MARGIN + 2, 68, &FreeSansBold18pt7b, INK_RED);  // offset shadow, as on the site
-  inkText("DomiFrame", MARGIN, 66, &FreeSansBold18pt7b, INK_BLACK);
   const int strip[6] = {INK_BLACK, INK_BLUE, INK_GREEN, INK_YELLOW, INK_RED, INK_WHITE};
-  int x = MARGIN + textWidth("DomiFrame", &FreeSansBold18pt7b) + 20;
-  inkRect(x - 2, 44, 6 * 16 + 4, 16, INK_BLACK);  // outlined, so the white block shows
-  for (int i = 0; i < 6; i++) inkRect(x + i * 16, 46, 16, 12, strip[i]);
+  int x = MARGIN + pixelWord("DomiFrame", MARGIN, 34, 3, INK_BLACK) + 22;
+  inkRect(x - 2, 41, 6 * 16 + 4, 16, INK_BLACK);  // outlined, so the white block shows
+  for (int i = 0; i < 6; i++) inkRect(x + i * 16, 43, 16, 12, strip[i]);
   inkRect(MARGIN, HEAD - 3, w - 2 * MARGIN, 3, INK_BLACK);
+}
+
+// A card on the screen: a black border on white, with a dithered shadow (as the site's prints)
+static const int CARD_SHADOW = 6;
+void drawCard(int x, int y, int w, int h) {
+  inkDither(x + CARD_SHADOW, y + CARD_SHADOW, w, h, INK_BLACK);
+  inkRect(x, y, w, h, INK_BLACK);
+  inkRect(x + 3, y + 3, w - 6, h - 6, INK_WHITE);
+}
+
+// The frame code's characters, CODE_SCALE units a dot and CODE_BOLD wider, so the strokes are
+// heavier than the gaps; digits in blue, letters in black, each drawn to differ from its
+// look-alikes (pixel_font.h). Four to a card.
+static const int CODE_SCALE = 6, CODE_BOLD = 2, CARD_PAD = 12;
+static const int CODE_CARD_W = 4 * PF_CODE_W * CODE_SCALE + 3 * CODE_SCALE + CODE_BOLD + 2 * CARD_PAD;
+static const int CODE_CARD_H = PF_CODE_H * CODE_SCALE + 2 * CARD_PAD;
+void drawCodeGroup(const String& group, int x, int top) {
+  for (int i = 0; i < (int)group.length(); i++) {
+    char ch = group[i];
+    const PfCodeGlyph* g = nullptr;
+    for (const PfCodeGlyph& k : PF_CODE) if (k.c == ch) g = &k;
+    if (!g) continue;
+    int ink = isdigit((unsigned char)ch) ? INK_BLUE : INK_BLACK;
+    int gx = x + i * (PF_CODE_W + 1) * CODE_SCALE;
+    for (int r = 0; r < PF_CODE_H; r++)
+      for (int c = 0; c < PF_CODE_W; c++)
+        if (g->rows[r][c] == '#') inkRect(gx + c * CODE_SCALE, top + r * CODE_SCALE, CODE_SCALE + CODE_BOLD, CODE_SCALE, ink);
+  }
 }
 
 // Two lines at the bottom, under a thin rule; returns where the rule is
@@ -295,14 +353,12 @@ void showMessage(const char* title, const char* line1, const char* line2 = nullp
   });
 }
 
-// The QR code made by makeQr, QR_MODULE units a module, with its quiet zone and a black border;
-// (x, y) is the border's top-left corner
+// The QR code made by makeQr, QR_MODULE units a module, with its quiet zone, as a card;
+// (x, y) is the card's top-left corner
 static const int QR_MODULE = 5;
 int qrSide() { return (qrSize + 8) * QR_MODULE + 6; }
 void drawQr(int x, int y) {
-  int side = qrSide();
-  inkRect(x, y, side, side, INK_BLACK);
-  inkRect(x + 3, y + 3, side - 6, side - 6, INK_WHITE);
+  drawCard(x, y, qrSide(), qrSide());
   for (int r = 0; r < qrSize; r++)
     for (int c = 0; c < qrSize; c++)
       if (qrDots[r][c]) inkRect(x + 3 + (c + 4) * QR_MODULE, y + 3 + (r + 4) * QR_MODULE, QR_MODULE, QR_MODULE, INK_BLACK);
@@ -446,39 +502,45 @@ bool unsealPicture(const uint8_t* sealed, uint8_t* out) {
   return rc == 0;
 }
 
-// The frame code in two big lines, the frame ID under it, and a QR code: beside them on a
-// wide screen, under them on a tall one
+// The frame code in four cards (digits blue, letters black), the frame ID under them, and a QR
+// code as a card: beside them on a wide screen, under them on a tall one. web/sim.js showCode
+// draws the same.
 void showCodeScreen() {
   // The QR code opens the frame's page with the code filled in. It's after the #, which
   // browsers never send to the server.
   String link = String(SERVER_BASE) + "/f/" + frameId + "#k=" + frameCode;
   bool qr = makeQr(link.c_str()) > 0;
-  bool split = frameCode.length() == 19;  // XXXX-XXXX / XXXX-XXXX
-  String codeTop = split ? frameCode.substring(0, 9) : frameCode;
-  String codeBottom = split ? frameCode.substring(10) : "";
   drawScreen([&] {
     int w = screenW(), h = screenH();
     drawHeader(w);
-    int foot = drawFooter(w, h, qr ? "Scan with a phone camera, or" : "Enter both at domiframe.art,",
-                          qr ? "enter both at domiframe.art." : "under My frame.");
+    int foot = drawFooter(w, h, qr ? "Scan it with a phone's camera, or enter" : "Enter both at domiframe.art,",
+                          qr ? "the code and ID at domiframe.art." : "under My frame.");
 
-    inkText("FRAME CODE", MARGIN, HEAD + 44, &FreeMonoBold9pt7b, INK_RED);
-    int y = HEAD + 94;
-    inkText(codeTop.c_str(), MARGIN, y, &FreeMonoBold24pt7b, INK_BLACK);
-    if (split) inkText(codeBottom.c_str(), MARGIN, y += 48, &FreeMonoBold24pt7b, INK_BLACK);
+    inkText("FRAME CODE", MARGIN, HEAD + 36, &FreeMonoBold9pt7b, INK_RED);
+    int top = HEAD + 50;
+    String rest = frameCode;
+    for (int i = 0; i < 4; i++) {  // XXXX-XXXX-XXXX-XXXX: a card each
+      int dash = rest.indexOf('-');
+      String group = dash < 0 ? rest : rest.substring(0, dash);
+      rest = dash < 0 ? "" : rest.substring(dash + 1);
+      int x = MARGIN + (i % 2) * (CODE_CARD_W + 16), y = top + (i / 2) * (CODE_CARD_H + 14);
+      drawCard(x, y, CODE_CARD_W, CODE_CARD_H);
+      drawCodeGroup(group, x + CARD_PAD, y + CARD_PAD);
+    }
+    int y = top + 2 * CODE_CARD_H + 14;
 
     bool wide = w > h;
     int side = qr ? qrSide() : 0;
     int room = (qr && wide ? w - MARGIN - side - 24 : w - MARGIN) - MARGIN;  // for the ID
-    inkText("FRAME ID", MARGIN, y += 48, &FreeMonoBold9pt7b, INK_RED);
+    inkText("FRAME ID", MARGIN, y += 36, &FreeMonoBold9pt7b, INK_RED);
     const GFXfont* idFont = &FreeMonoBold18pt7b;
     if (textWidth(frameId.c_str(), idFont) > room) idFont = &FreeMonoBold12pt7b;
     if (textWidth(frameId.c_str(), idFont) > room) idFont = &FreeMonoBold9pt7b;
     inkText(frameId.c_str(), MARGIN, y += 34, idFont, INK_BLACK);
 
     if (qr) {
-      int top = wide ? HEAD : y + 20;  // centered in the space left
-      drawQr(wide ? w - MARGIN - side : (w - side) / 2, top + (foot - top - side) / 2);
+      int qtop = wide ? HEAD : y + 20;  // centered in the space left
+      drawQr(wide ? w - MARGIN - side - CARD_SHADOW : (w - side) / 2, qtop + (foot - qtop - side) / 2);
     }
   });
   etag = "";  // the picture comes back at the next wake
