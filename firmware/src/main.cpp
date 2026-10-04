@@ -565,8 +565,8 @@ void showCodeScreen() {
 
     // Headline
     int y = 134 + ex * 2 / 5;
-    inkText("Let's get your frame", MARGIN, y, &PlexTitle, INK_BLACK);
-    inkText("connected!", MARGIN, y += 36, &PlexTitle, INK_BLACK);
+    inkText("Add this frame", MARGIN, y, &PlexTitle, INK_BLACK);
+    inkText("to your phone", MARGIN, y += 36, &PlexTitle, INK_BLACK);
 
     // The frame ID, in a pale field
     inkText("FRAME ID", MARGIN, y += 40 + ex / 10, &PlexLabel, INK_RED);

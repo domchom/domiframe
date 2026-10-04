@@ -184,8 +184,8 @@ const showCode = (id) => screen(({ w, h, rect, text, width }) => {
 
   // Headline
   let y = 134 + Math.floor(ex * 2 / 5);
-  text("Let's get your frame", MARGIN, y, SANS_18, 0);
-  text("connected!", MARGIN, (y += 36), SANS_18, 0);
+  text("Add this frame", MARGIN, y, SANS_18, 0);
+  text("to your phone", MARGIN, (y += 36), SANS_18, 0);
 
   // The frame ID, in a pale field
   text("FRAME ID", MARGIN, (y += 40 + Math.floor(ex / 10)), LABEL, 3);

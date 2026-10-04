@@ -169,8 +169,8 @@ $("invite").addEventListener("click", async () => {
   box.append(buttons);
   await ask({
     title: `Invite someone to ${frameInfo?.name || "this frame"}`,
-    message: "They scan this with their phone's camera, or open the link, and can send pictures right away. " +
-      "It also lets them remove pictures, so share it like a house key.",
+    message: "They can scan this with a phone's camera or open the link to send pictures. " +
+      "It also lets them remove pictures, so only share it with people you trust.",
     body: box, ok: "Done", cancel: null,
   });
 });
