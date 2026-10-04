@@ -112,12 +112,13 @@ const ART_PAINTING = [ // the app icon's painting: sunset, hills, water
   "bbbbbbbbbbbwbbbb", "bbbbbbbbbbwbwbbb", "bbbbbbbbbbbwbbbb", "bbbbbbbbbbbbbbbb",
 ];
 const ART_PLANT = [
-  "......gg......", ".....gggg.....", "gg...gggg...gg", "ggg..gggg..ggg", ".ggg.gggg.ggg.",
-  "..ggggggggg...", "...ggggggg....", "....ggggg.....", ".....ggg......", "......g.......",
+  ".....g..g.....", "....gg..gg....", "...ggg..ggg...", "g..gggggggg..g", "gg..gggggg..gg", "ggg..gggg..ggg", ".ggg.gggg.ggg.", "..gggggggggg..", "...gggggggg...", "....gggggg....", ".....gggg.....", "......gg......",
+];
+const ART_POT = [
+  "kkkkkkkkkkkk", "kooooooooook", "kkkkkkkkkkkk", ".kooooooook.", ".kooooooook.", ".kooooooook.", "..kooooook..", "..kkkkkkkk..",
 ];
 const ART_PHONE = [
-  "kkkkkkkk", "kwwwwwwk", "kwwwwwwk", "kwwwwwwk", "kwwwwwwk", "kwwwwwwk", "kwwwwwwk",
-  "kwwwwwwk", "kwwwwwwk", "kkkkkkkk", "kkkwwkkk", "kkkkkkkk",
+  ".kkkkkkkkk.", "kkkkwwwkkkk", "kkkkkkkkkkk", "kbbbbbbbbbk", "kbwwwwwwwbk", "kbwkkwkkwbk", "kbwkkwkkwbk", "kbwwwwwwwbk", "kbwkkwkwwbk", "kbwkkwwkwbk", "kbwwwwwwwbk", "kbbbbbbbbbk", "kkkkkkkkkkk", "kkkkwwwkkkk", ".kkkkkkkkk.",
 ];
 const ART_INK = { k: 0, w: 1, y: 2, r: 3, b: 4, g: 5 };
 
@@ -168,8 +169,8 @@ const showCode = (id) => screen(({ w, h, rect, text, width }) => {
   pixelWord("DomiFrame", MARGIN + 58, 24, 3, 0);
   text("COLOR E-PAPER PHOTO FRAMES", MARGIN + 58, 74, MONO_9, 0);
   const sx = w - MARGIN - 6 * 16 - 4;
-  rect(sx, 34, 6 * 16 + 4, 16, 0);
-  [0, 4, 5, 2, 3, 1].forEach((ink, i) => rect(sx + 2 + i * 16, 36, 16, 12, ink));
+  rect(sx, 31, 6 * 16 + 4, 16, 0); // centred on the wordmark
+  [0, 4, 5, 2, 3, 1].forEach((ink, i) => rect(sx + 2 + i * 16, 33, 16, 12, ink));
   rect(MARGIN, 92, w - 2 * MARGIN, 2, 0);
 
   const wide = w > h;
@@ -185,12 +186,12 @@ const showCode = (id) => screen(({ w, h, rect, text, width }) => {
 
   // The frame ID, in a pale field
   text("FRAME ID", MARGIN, (y += 40), MONO_9, 3);
-  round(MARGIN, (y += 8), colW, 40, 7, tint);
-  const idFont = [MONO_12, MONO_9].find((f) => width(id, f) + 28 <= colW) || MONO_9;
-  text(id, MARGIN + 14, y + 28, idFont, 0);
+  round(MARGIN, (y += 8), colW, 48, 7, tint);
+  const idFont = [MONO_18, MONO_12, MONO_9].find((f) => width(id, f) + 32 <= colW) || MONO_9;
+  text(id, MARGIN + 16, y + 34, idFont, 0);
 
   // The code, in a pale field: one line at the biggest size that fits, else two
-  text("FRAME CODE", MARGIN, (y += 40 + 34), MONO_9, 3);
+  text("FRAME CODE", MARGIN, (y += 48 + 30), MONO_9, 3);
   const pad = 14;
   let sc = [6, 5, 4].find((k) => codeLines(k, 4).lineW + 2 * pad <= colW), perLine = 4;
   if (!sc) { perLine = 2; sc = [6, 5, 4, 3].find((k) => codeLines(k, 2).lineW + 2 * pad <= colW) || 3; }
@@ -232,23 +233,22 @@ const showCode = (id) => screen(({ w, h, rect, text, width }) => {
     }
   }
 
-  // How to use it, by a phone
-  const ty = (wide || !qr ? y : cardY + cardH) + 42;
-  art(ART_PHONE, MARGIN, ty - 16, 2);
-  text(qr ? "Scan the QR code with a phone's camera," : "Enter the ID and code at", MARGIN + 30, ty, SANS_12, 0);
-  text(qr ? "or enter the ID and code at domiframe.art." : "domiframe.art, under My frame.", MARGIN + 30, ty + 26, SANS_12, 0);
+  // How to use it, by a phone: level with the shelf, so the bottom reads as one band
+  const shelfY = h - MARGIN, shelfW = 190, shelfX = w - MARGIN - shelfW;
+  const ty = Math.max((wide || !qr ? y : cardY + cardH) + 46, wide ? shelfY - 28 : 0);
+  art(ART_PHONE, MARGIN, ty - 22, 2);
+  text(qr ? "Scan the QR code with a phone's camera," : "Enter the ID and code at", MARGIN + 38, ty, SANS_12, 0);
+  text(qr ? "or enter the ID and code at domiframe.art." : "domiframe.art, under My frame.", MARGIN + 38, ty + 26, SANS_12, 0);
 
   // A frame on a shelf, beside a plant: in the corner, where there's room
-  const shelfY = h - MARGIN, shelfX = w - MARGIN - 230;
   if (wide && qr && shelfY - 64 > cardY + cardH + CARD_SHADOW + 8) {
-    round(shelfX, shelfY, 230, 10, 3, (xx, yy) => ((xx + yy) & 1 ? 2 : 3));
-    rect(shelfX, shelfY, 230, 2, 0);
-    const fx = shelfX + 120, fy = shelfY - 56;
+    round(shelfX, shelfY, shelfW, 10, 3, (xx, yy) => ((xx + yy) & 1 ? 2 : 3));
+    rect(shelfX, shelfY, shelfW, 2, 0);
+    const fx = shelfX + shelfW - 82, fy = shelfY - 56;
     round(fx, fy, 72, 56, 6, solid(0));
     art(ART_PAINTING, fx + 4, fy + 4, 4);
-    art(ART_PLANT, shelfX + 46, shelfY - 46, 2);
-    round(shelfX + 50, shelfY - 26, 22, 26, 3, solid(0));
-    round(shelfX + 52, shelfY - 24, 18, 24, 2, solid(1));
+    art(ART_POT, shelfX + 18, shelfY - 16, 2);
+    art(ART_PLANT, shelfX + 16, shelfY - 16 - 24, 2);
   }
 });
 
