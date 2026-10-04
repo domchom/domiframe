@@ -34,6 +34,7 @@
 #include <esp_system.h>
 #include <mbedtls/md.h>
 #include <mbedtls/gcm.h>
+#include <mbedtls/aes.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/pk.h>
 #include <Update.h>
@@ -460,47 +461,100 @@ String accessTokenHash() {
 }
 
 // Opens a sealed picture into out (IMAGE_BYTES). False if it wasn't sealed with our code.
-bool unsealPicture(const uint8_t* sealed, uint8_t* out) {
-  // In chunks through internal RAM: the picture lives in PSRAM, and the ESP32-S3's AES
-  // accelerator can't be trusted to read and write large PSRAM buffers directly
-  static const size_t CHUNK = 4096;
-  uint8_t* in = (uint8_t*)heap_caps_malloc(CHUNK, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  uint8_t* res = (uint8_t*)heap_caps_malloc(CHUNK, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  if (!in || !res) {
-    free(in);
-    free(res);
-    Serial.println("no memory to open the picture");
-    return false;
+// AES-GCM decryption, written out: AES-CTR for the data and GHASH for the tag. The ESP32-S3's
+// built-in GCM gave wrong tags for a whole 192 KB picture (it can't be done in one call from
+// internal RAM, and split up, the hardware GHASH goes wrong), while its plain AES block
+// cipher is reliable. Only the AES block is the hardware's here; GHASH is in software.
+struct Gcm {
+  mbedtls_aes_context aes;
+  uint8_t h[16];      // the hash key: AES(0)
+  uint8_t ghash[16];  // the running hash
+};
+
+// x = x * h in GF(2^128), as GCM defines it (bit-reflected, R = 0xE1 || 0^120)
+static void gfMul(uint8_t x[16], const uint8_t h[16]) {
+  uint8_t z[16] = {0}, v[16];
+  memcpy(v, h, 16);
+  for (int i = 0; i < 128; i++) {
+    if (x[i / 8] & (0x80 >> (i % 8)))
+      for (int k = 0; k < 16; k++) z[k] ^= v[k];
+    bool lsb = v[15] & 1;
+    for (int k = 15; k > 0; k--) v[k] = (v[k] >> 1) | (v[k - 1] << 7);
+    v[0] >>= 1;
+    if (lsb) v[0] ^= 0xE1;
   }
-  uint8_t key[32], tag[GCM_TAG_BYTES];
-  frameKey("content", key);
-  mbedtls_gcm_context gcm;
-  mbedtls_gcm_init(&gcm);
-  int rc = mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key, 256);
-  if (rc == 0) rc = mbedtls_gcm_starts(&gcm, MBEDTLS_GCM_DECRYPT, sealed, GCM_IV_BYTES, nullptr, 0);
-  for (size_t done = 0; rc == 0 && done < IMAGE_BYTES;) {
-    size_t n = min(CHUNK, IMAGE_BYTES - done);  // a multiple of 16 but for the last
-    memcpy(in, sealed + GCM_IV_BYTES + done, n);
-    rc = mbedtls_gcm_update(&gcm, n, in, res);
-    memcpy(out + done, res, n);
-    done += n;
+  memcpy(x, z, 16);
+}
+
+static void ghashBlock(Gcm& g, const uint8_t* block, size_t n) {
+  for (size_t i = 0; i < n; i++) g.ghash[i] ^= block[i];
+  gfMul(g.ghash, g.h);
+}
+
+// Opens IV (12) || ciphertext (len) || tag (16) into out (len bytes). The input may be in PSRAM:
+// it's read 16 bytes at a time into internal RAM.
+static bool gcmOpen(const uint8_t key[32], const uint8_t* sealed, size_t len, uint8_t* out) {
+  Gcm g;
+  mbedtls_aes_init(&g.aes);
+  bool ok = mbedtls_aes_setkey_enc(&g.aes, key, 256) == 0;
+  uint8_t zero[16] = {0}, j0[16], ctr[16], ks[16], blk[16], tag[16];
+  if (ok) ok = mbedtls_aes_crypt_ecb(&g.aes, MBEDTLS_AES_ENCRYPT, zero, g.h) == 0;
+  memset(g.ghash, 0, 16);
+  memcpy(j0, sealed, 12);  // a 12-byte IV: J0 = IV || 0x00000001
+  j0[12] = 0; j0[13] = 0; j0[14] = 0; j0[15] = 1;
+  memcpy(ctr, j0, 16);
+  for (size_t done = 0; ok && done < len; done += 16) {
+    size_t n = min((size_t)16, len - done);
+    memcpy(blk, sealed + 12 + done, n);
+    ghashBlock(g, blk, n);  // GHASH is over the ciphertext
+    for (int k = 15; k >= 12 && ++ctr[k] == 0; k--) {}  // inc32
+    ok = mbedtls_aes_crypt_ecb(&g.aes, MBEDTLS_AES_ENCRYPT, ctr, ks) == 0;
+    for (size_t k = 0; k < n; k++) blk[k] ^= ks[k];
+    memcpy(out + done, blk, n);
   }
-  if (rc == 0) rc = mbedtls_gcm_finish(&gcm, tag, sizeof tag);
-  // The tag says whether this was sealed with our key, and wasn't changed on the way
+  // The lengths block: no associated data, then the ciphertext's length in bits
+  uint8_t lens[16] = {0};
+  uint64_t bits = (uint64_t)len * 8;
+  for (int k = 0; k < 8; k++) lens[15 - k] = bits >> (8 * k);
+  ghashBlock(g, lens, 16);
+  if (ok) ok = mbedtls_aes_crypt_ecb(&g.aes, MBEDTLS_AES_ENCRYPT, j0, tag) == 0;
+  mbedtls_aes_free(&g.aes);
+  const uint8_t* want = sealed + 12 + len;
   uint8_t diff = 0;
-  const uint8_t* want = sealed + GCM_IV_BYTES + IMAGE_BYTES;
-  for (size_t i = 0; i < GCM_TAG_BYTES; i++) diff |= tag[i] ^ want[i];
-  mbedtls_gcm_free(&gcm);
+  for (int k = 0; k < 16; k++) diff |= (tag[k] ^ g.ghash[k]) ^ want[k];
+  memset(&g, 0, sizeof g);
+  memset(ks, 0, sizeof ks);
+  return ok && diff == 0;
+}
+
+// Once at start: open a sample sealed by the website's own code (web/seal.js, frame "emma",
+// code K7PX-92QD-M4TR-8WZN). If this fails, opening pictures can't work either.
+static void gcmSelfTest() {
+  static const uint8_t sample[] = {0x72, 0x63, 0x0d, 0x5a, 0x54, 0xba, 0x34, 0xa7, 0x8a, 0x68, 0xf3, 0xb1, 0xf3, 0x7b, 0x8f, 0x88, 0x78, 0x55, 0x1e, 0x1e, 0x6b, 0x42, 0x8f, 0xa5, 0xb1, 0x58, 0x33, 0x28, 0x50, 0x63, 0x3f, 0x74, 0x02};
+  static const uint8_t want[] = {0, 1, 2, 250, 255};
+  String savedId = frameId, savedCode = frameCode;
+  frameId = "emma";
+  frameCode = "K7PX-92QD-M4TR-8WZN";
+  uint8_t key[32], out[sizeof want];
+  frameKey("content", key);
+  frameId = savedId;
+  frameCode = savedCode;
+  bool ok = gcmOpen(key, sample, sizeof want, out) && memcmp(out, want, sizeof want) == 0;
   memset(key, 0, sizeof key);
-  free(in);
-  free(res);
-  if (rc != 0 || diff) {
+  Serial.printf("decryption self-test: %s\n", ok ? "ok" : "FAILED");
+}
+
+bool unsealPicture(const uint8_t* sealed, uint8_t* out) {
+  uint8_t key[32];
+  frameKey("content", key);
+  bool ok = gcmOpen(key, sealed, IMAGE_BYTES, out);
+  memset(key, 0, sizeof key);
+  if (!ok) {
     // Which code this frame has, as the first characters of its token's hash: compare with
     // the server's to tell a different code from a decryption problem (never the code itself)
-    Serial.printf("can't open: rc=%d, tag %s, code hash %.12s\n", rc, diff ? "differs" : "ok", accessTokenHash().c_str());
-    return false;
+    Serial.printf("can't open: code hash %.12s\n", accessTokenHash().c_str());
   }
-  return true;
+  return ok;
 }
 
 // ---- The code screen ---------------------------------------------------------------------
@@ -1104,6 +1158,7 @@ void setup() {
 
   loadSettings();
   sleepMinutes = usualMinutes();  // until the server says otherwise
+  gcmSelfTest();
 
   // Before Wi-Fi: the radio pulls the battery's voltage down while it's on, and the reading with it
   int mv = readBatteryMv();
