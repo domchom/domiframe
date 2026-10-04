@@ -439,7 +439,7 @@ async function wake(reason) {
     }
     const headers = { "X-Device-Key": key, "X-Battery-Mv": $("mv").value, "X-Fw": FW };
     if (etag) headers["If-None-Match"] = etag;
-    if (hangPending) headers["X-Set-Orientation"] = hangPending; // like the real frame's setup portal
+    if (hangPending) headers["X-Set-Orientation"] = hangPending; // like the real frame's Wi-Fi setup
     if (screenPending) headers["X-Panel"] = screenPending;
     const res = await fetch(`/api/frames/${encodeURIComponent(id)}/image`, { headers, cache: "no-store" });
     const sleep = Number(res.headers.get("x-sleep-minutes")) || 0;
@@ -517,7 +517,7 @@ $("show-code").addEventListener("click", async () => {
   etag = ""; // the picture comes back at the next wake
   await showCode(id);
 });
-// Like "Make a new frame code" in the real frame's setup portal
+// Like "Make a new frame code" in the real frame's Wi-Fi setup
 $("new-code").addEventListener("click", async () => {
   const id = $("id").value.trim();
   if (!id) return;

@@ -125,7 +125,7 @@ $("refresh").addEventListener("click", load);
 // ---- actions ---------------------------------------------------------------
 
 async function newKey(f) {
-  const warning = `Make a new device key for "${f.name}"? The frame stops updating until you enter the new key in its setup portal (hold KEY3 and press reset). Its frame code and pictures stay as they are.`;
+  const warning = `Make a new device key for "${f.name}"? The frame stops updating until you enter the new key in its Wi-Fi setup, under Frame details (hold KEY3 and press reset). Its frame code and pictures stay as they are.`;
   if (!(await ask({ title: "New device key?", message: warning, ok: "Replace key", danger: true }))) return;
   const res = await api(`/${f.id}/keys`, { method: "POST", body: JSON.stringify({ key: "device" }) });
   const data = await res.json();
@@ -183,8 +183,8 @@ function showResult(id, data, title) {
     "Once the frame is set up it makes its own frame code and shows it on its screen: that code, not anything here, is what opens the frame on the website.";
   const body = $("result-body");
   body.replaceChildren();
-  body.append(field("Frame ID: enter in the frame's setup portal", id));
-  body.append(field("Device key: enter in the frame's setup portal", data.deviceKey));
+  body.append(field("Frame ID: enter on the frame's Wi-Fi setup page", id));
+  body.append(field("Device key: enter on the frame's Wi-Fi setup page", data.deviceKey));
   // No hardware yet? The virtual frame does what the real one does, in a browser tab
   const a = el("a", "chip", "Open as a virtual frame");
   // With the screen chosen above, so the virtual frame starts as that screen
