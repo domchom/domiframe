@@ -51,6 +51,7 @@
 // Buttons (from Seeed EE04 wiki; active LOW)
 #define BTN_REFRESH 2  // KEY1: wake and check for a new picture now
 #define BTN_SETUP 5    // KEY3: hold while powering on / pressing reset to reopen Wi-Fi setup
+#define BTN_NEXT 3     // KEY2: wake and put up the next picture; hold while pressing reset for status
 
 // Battery sense (from Seeed EE04 wiki)
 #define BAT_ADC_PIN 1        // A0

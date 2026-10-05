@@ -420,7 +420,8 @@ async function showClock() {
     ? `Server clock: ${serverTime.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })} (+${(c.offsetMinutes / 60).toFixed(1)} h)`
     : "Server clock: real time";
 }
-async function wake(reason) {
+// next: KEY2, the next picture now (X-Next)
+async function wake(reason, { next = false } = {}) {
   if (busy) return;
   busy = true; $("key1").disabled = true; $("led").classList.add("on");
   const id = $("id").value.trim(), key = $("key").value.trim();
@@ -431,7 +432,7 @@ async function wake(reason) {
     if (store.get(`pending:${id}`)) {
       const status = await registerCode(id, key);
       if (status === 401 || status === 404) {
-        await message("Frame not registered", "Hold KEY3 and press reset", "to re-enter the frame ID and key.");
+        await message("Frame not registered", "Its frame ID or device key is wrong.", "Ask whoever set it up to check them.");
         return;
       }
       if (status === 200) { await showCode(id); drewSomething = true; }
@@ -439,6 +440,7 @@ async function wake(reason) {
     }
     const headers = { "X-Device-Key": key, "X-Battery-Mv": $("mv").value, "X-Fw": FW };
     if (etag) headers["If-None-Match"] = etag;
+    if (next) headers["X-Next"] = "1";
     if (hangPending) headers["X-Set-Orientation"] = hangPending; // like the real frame's Wi-Fi setup
     if (screenPending) headers["X-Panel"] = screenPending;
     const res = await fetch(`/api/frames/${encodeURIComponent(id)}/image`, { headers, cache: "no-store" });
@@ -463,7 +465,7 @@ async function wake(reason) {
     if (sleep) sleepMinutes = sleep;
     log(`GET /api/frames/${id}/image -> ${res.status}` + (sleep ? `, server says sleep ${sleep} min` : ""));
     if (res.status === 401 || res.status === 404) {
-      await message("Frame not registered", "Hold KEY3 and press reset", "to re-enter the frame ID and key.");
+      await message("Frame not registered", "Its frame ID or device key is wrong.", "Ask whoever set it up to check them.");
     } else if (res.status === 200) {
       const sealed = new Uint8Array(await res.arrayBuffer());
       if (sealed.length !== (W * H) / 2 + SEAL_OVERHEAD) { log(`unexpected size ${sealed.length}`); return; }
@@ -495,6 +497,24 @@ async function wake(reason) {
 }
 
 $("key1").addEventListener("click", () => wake("KEY1"));
+$("key2").addEventListener("click", () => wake("KEY2", { next: true }));
+// Like holding KEY2 while pressing reset: a check-in that leaves the picture as it is
+$("status-check").addEventListener("click", async () => {
+  const id = $("id").value.trim(), key = $("key").value.trim();
+  try {
+    const res = await fetch(`/api/frames/${encodeURIComponent(id)}/image`, {
+      headers: { "X-Device-Key": key, "X-Battery-Mv": $("mv").value, "X-Fw": FW, "X-Status": "1" }, cache: "no-store",
+    });
+    log(`GET /api/frames/${id}/image (status) -> ${res.status}`);
+    const n = res.headers.get("x-pictures");
+    await message("Frame status",
+      res.status === 204 ? `${res.headers.get("x-frame-name")}: reached, ${n} picture${n === "1" ? "" : "s"}` : `Server: ${res.status}`,
+      `Battery ${$("mv").value} mV · ${res.headers.get("x-local-time") || ""}`);
+    etag = ""; // the picture comes back at the next wake
+  } catch (err) {
+    await message("Frame status", "Server: no answer", err.message);
+  }
+});
 $("screen-size").addEventListener("change", () => {
   setScreen($("screen-size").value);
   screenPending = screenSize;

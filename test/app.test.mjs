@@ -406,6 +406,28 @@ test("firmware updates: offered to frames on an older version of the same build"
   assert.ok(!newerVersion("1.0", "0.6.0"));
 });
 
+test("the frame's buttons: next picture, and a status check that changes nothing", async () => {
+  const f = await newFrame("buttons");
+  await f.upload(1, { queue: "rotation" });
+  await f.upload(2, { queue: "rotation" });
+  const first = await f.dev();
+  assert.equal(first.status, 200);
+  const etag = first.headers.get("etag");
+  assert.match(first.headers.get("x-local-time"), /^\w{3} \d{1,2} \w{3}, \d{2}:\d{2}/);
+
+  const status = await f.dev({ "x-status": "1", "if-none-match": etag });
+  assert.equal(status.status, 204);
+  assert.equal(status.headers.get("x-frame-name"), "buttons");
+  assert.equal(status.headers.get("x-pictures"), "2");
+  assert.ok(status.headers.get("x-sleep-minutes"));
+  assert.equal((await f.dev({ "if-none-match": etag })).status, 304, "the status check didn't move the picture on");
+  assert.ok((await f.info()).lastSeen, "it counts as a check-in");
+
+  const next = await f.dev({ "x-next": "1", "if-none-match": etag });
+  assert.equal(next.status, 200);
+  assert.notEqual(next.headers.get("etag"), etag);
+});
+
 test("a frame the admin just made has no code yet: nothing opens it", async () => {
   const created = await adminReq("/api/admin/frames", { method: "POST", body: JSON.stringify({ id: "fresh" }) });
   assert.equal(created.status, 201);

@@ -28,6 +28,29 @@ test("rotates on schedule, wrapping around, with 5% drift allowed", () => {
   assert.equal(state.current, "a");
 });
 
+test("the frame's next button: the next picture now, which then stays a whole turn", () => {
+  const next = { advance: true };
+  let state = { ...withPics("a", "b", "c"), current: "a", since: new Date(T0).toISOString(), seen: ["a", "b", "c"] };
+  const s = { rotateHours: 24 };
+  let r = choosePicture(state, s, T0 + H, Math.random, next);
+  assert.equal(r.state.current, "b");
+  assert.equal(choosePicture(r.state, s, T0 + 2 * H).changed, false, "stays until its turn is up");
+  r = choosePicture(r.state, s, T0 + 2 * H, Math.random, next);
+  assert.equal(r.state.current, "c");
+  // even when the frame only changes for new pictures
+  assert.equal(choosePicture(state, { rotateHours: 0 }, T0 + H, Math.random, next).state.current, "b");
+  // a new picture still comes first
+  state = { ...state, pictures: [...state.pictures, pic("d")] };
+  assert.equal(choosePicture(state, s, T0 + H, Math.random, next).state.current, "d");
+  // on a picture's day with just the one, next moves on to the usual ones until the turn is up
+  state = setPictureDay({ ...withPics("a", "b", "bday"), current: "bday", since: new Date(T0).toISOString(), seen: ["a", "b", "bday"] }, ["bday"], "06-01");
+  r = choosePicture(state, s, T0 + H, Math.random, next);
+  assert.equal(r.state.current, "a");
+  assert.equal(choosePicture(r.state, s, T0 + 2 * H).changed, false);
+  // one picture: nothing to move to
+  assert.equal(choosePicture({ ...withPics("a"), current: "a", seen: ["a"] }, s, T0, Math.random, next).state.current, "a");
+});
+
 test("rotateHours 0 keeps the picture until a new one arrives", () => {
   const state = { ...withPics("a", "b"), current: "a", since: new Date(T0).toISOString(), seen: ["a", "b"] };
   assert.equal(choosePicture(state, { rotateHours: 0 }, T0 + 1000 * H).changed, false);

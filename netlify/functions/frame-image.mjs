@@ -2,10 +2,14 @@
 //   GET  (the frame)   header X-Device-Key, optional If-None-Match, X-Battery-Mv, X-Fw,
 //                      X-Set-Orientation (landscape|portrait, when set on the frame),
 //                      X-Panel (7.3|13.3: the screen the firmware was built for),
-//                      X-Fw-Env (ee04|ee02-13in3: which firmware build it runs)
-//        -> 200 sealed packed image | 304 unchanged | 204 nothing uploaded yet
+//                      X-Fw-Env (ee04|ee02-13in3: which firmware build it runs),
+//                      X-Next: 1 (someone pressed the frame's "next" button: the next picture now),
+//                      X-Status: 1 (the frame's status screen: check in without changing the picture)
+//        -> 200 sealed packed image | 304 unchanged | 204 nothing uploaded yet (or X-Status)
 //        Every reply carries X-Sleep-Minutes (when to check in next), X-Retry-Minutes (the usual
-//        interval, for when a check-in fails) and X-Orientation, and
+//        interval, for when a check-in fails), X-Orientation and X-Local-Time (now, where the
+//        frame hangs, for its status screen); an X-Status reply also X-Frame-Name and X-Pictures;
+//        and
 //        when newer firmware is out: X-Fw-Update (version), X-Fw-Url, X-Fw-Size and X-Fw-Sig
 //        (see lib/firmware.mjs).
 //   POST (upload page) Authorization: Bearer <token derived from the frame code>, multipart form,
@@ -24,7 +28,9 @@ import {
   purgeOldCode,
 } from "../lib/common.mjs";
 import { firmwareHeaders } from "../lib/firmware.mjs";
-import { choosePicture, nextWakeMinutes, retryMinutes, addPicture, mergeSettings, fitsPanel } from "../lib/schedule.mjs";
+import {
+  choosePicture, nextWakeMinutes, retryMinutes, addPicture, mergeSettings, fitsPanel, pool, localTimeLabel,
+} from "../lib/schedule.mjs";
 
 export const config = { path: "/api/frames/:id/image" };
 
@@ -61,13 +67,16 @@ async function deviceFetch(req, id, frame) {
   const parsedMv = parseInt(req.headers.get("x-battery-mv") || "", 10);
   const mv = Number.isFinite(parsedMv) && parsedMv > 0 ? parsedMv : null;
 
+  // The status screen only looks: the picture and the rotation stay as they are
+  const statusOnly = req.headers.get("x-status") === "1";
+  const advance = req.headers.get("x-next") === "1";
   let state = null;
-  const saved = await updateState(id, (before) => {
-    const out = choosePicture(before, frame.settings, t);
+  const saved = statusOnly ? null : await updateState(id, (before) => {
+    const out = choosePicture(before, frame.settings, t, Math.random, { advance });
     state = out.state;
     return out.changed ? out.state : null;
   });
-  state = saved || state;
+  state = saved || state || (await loadState(id));
 
   const sleepMinutes = nextWakeMinutes(state, frame.settings, t, mv);
   const statusWrite = status().setJSON(id, {
@@ -83,8 +92,18 @@ async function deviceFetch(req, id, frame) {
     "x-retry-minutes": String(retryMinutes(frame.settings, mv)),
     "x-orientation": frame.settings?.orientation || "landscape",
     "x-panel": frame.settings?.panel || "7.3",
+    "x-local-time": localTimeLabel(t, frame.settings?.tz),
     ...firmwareHeaders(req.headers.get("x-fw-env"), req.headers.get("x-fw")),
   };
+
+  if (statusOnly) {
+    await statusWrite;
+    const name = String(frame.name || "").replace(/[^\x20-\x7e]/g, "").trim(); // headers are ASCII
+    return new Response(null, {
+      status: 204,
+      headers: { ...sleep, "x-frame-name": name || id, "x-pictures": String(pool(state, frame.settings).length) },
+    });
+  }
 
   // Never send a picture made for another screen size: the frame would reject the byte count
   const pic = state.pictures.find((p) => p.id === state.current && fitsPanel(p, frame.settings));

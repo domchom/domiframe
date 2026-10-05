@@ -99,6 +99,16 @@ export function localDate(ms, tz) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(ms);
 }
 
+/** "Mon 5 Oct, 14:02" where the frame hangs (its quiet-hours time zone), for its status screen. */
+export function localTimeLabel(ms, tz = "UTC") {
+  const opts = { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
+  try {
+    return new Intl.DateTimeFormat("en-GB", { ...opts, timeZone: tz }).format(ms);
+  } catch {
+    return new Intl.DateTimeFormat("en-GB", { ...opts, timeZone: "UTC" }).format(ms) + " UTC";
+  }
+}
+
 /** Is a picture's day ("MM-DD" every year, or "YYYY-MM-DD") the date `ymd`? Feb 29 shows on Feb 28 in other years. */
 export function isPictureDay(day, ymd) {
   if (!day) return false;
@@ -139,13 +149,15 @@ export function pool(state, settings) {
  *   2. pictures set for today (in the frame's time zone), taking turns if there are several
  *   3. new pictures in the cycling folder, oldest first, so a burst of uploads each get a turn
  *   4. the next picture in the folder when the rotation is due (in order or shuffled)
+ * advance: someone pressed the frame's "next" button (button 2), so the rotation is due now,
+ * whatever the schedule; the picture it brings stays up for a whole turn, like a "show next" one.
  * Returns { state, changed }.
  */
-export function choosePicture(inState, settings, now, rng = Math.random) {
+export function choosePicture(inState, settings, now, rng = Math.random, { advance = false } = {}) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
   let state = normalizeState(inState);
   let changed = false;
-  const show = (id, onDemand = false) => ({
+  const show = (id, onDemand = advance) => ({
     state: {
       ...state, current: id, since: new Date(now).toISOString(), onDemand,
       seen: [...new Set([...state.seen, id])], bag: state.bag.filter((b) => b !== id),
@@ -164,12 +176,14 @@ export function choosePicture(inState, settings, now, rng = Math.random) {
     return { state: { ...state, current: null, since: null, onDemand: false }, changed: changed || state.current !== null };
   }
   const elapsed = now - Date.parse(state.since || 0);
-  const due = s.rotateHours > 0 && elapsed >= s.rotateHours * 3600e3 * 0.95; // 5% early: the sleep timer drifts
+  const due = advance || (s.rotateHours > 0 && elapsed >= s.rotateHours * 3600e3 * 0.95); // 5% early: the sleep timer drifts
 
   // A picture "show next" put up today stays until its turn ends, even on a picture's day
   const today = localDate(now, s.tz);
   const todays = state.pictures.filter((p) => fitsPanel(p, s) && isPictureDay(p.day, today));
-  if (todays.length && !(state.onDemand && !due && state.pictures.some((p) => p.id === state.current))) {
+  // "Next" on a day with only one picture of its own moves on to the usual ones
+  const skipDay = advance && todays.length === 1 && todays[0].id === state.current;
+  if (todays.length && !skipDay && !(state.onDemand && !due && state.pictures.some((p) => p.id === state.current))) {
     const i = todays.findIndex((p) => p.id === state.current);
     if (i === -1) return show(todays[0].id);
     if (due && todays.length > 1) return show(todays[(i + 1) % todays.length].id);

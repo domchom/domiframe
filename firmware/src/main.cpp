@@ -20,6 +20,9 @@
 // Hold KEY1 while pressing reset to show the code again; the setup portal can make a new one,
 // or take back the code the frame had (the server then brings back the pictures sealed with it).
 //
+// KEY2: press it and the frame wakes and puts up the next picture (X-Next). Hold it while
+// pressing reset for the status screen: Wi-Fi, server, battery and the last check-in.
+//
 // Updates over Wi-Fi: when newer firmware for this build is out, the check-in reply says so.
 // The frame downloads it, checks its signature against FW_SIGNING_KEY (include/fw_key.h) and
 // installs it. Settings, Wi-Fi and the frame code are kept, so its pictures stay.
@@ -101,6 +104,7 @@ bool codePending = false;  // made but not yet registered with the server
 // How long to sleep: the server's X-Sleep-Minutes after a check-in, otherwise the usual interval
 uint32_t sleepMinutes = SLEEP_MINUTES;
 bool checkedIn = false;  // the server answered this wake's check-in
+bool wantNext = false;   // woken by KEY2: ask for the next picture
 // How the frame hangs: "landscape" or "portrait". Chosen in the setup portal (sent to the server
 // until it confirms), otherwise whatever the server says (set on the website). Pictures arrive
 // already turned for it; this only decides which way up our own messages are drawn.
@@ -792,6 +796,86 @@ void showSetupScreen(const String& apPassword, const String& note = "") {
   });
 }
 
+// ---- Status screen (hold KEY2 while pressing reset) ----------------------------------
+// What anyone helping over the phone asks first. The frame tries its Wi-Fi and the server
+// right now (without changing the picture), and remembers when a check-in last got through
+// for when it can't.
+
+struct Status {
+  String wifi, wifiNote;  // the saved network, and why joining it didn't work
+  int rssi = 0;
+  int server = -100;      // HTTP status of the check: <= 0 no answer, -100 not tried
+  String name, pictures, lastOk;
+};
+
+// Shortened with "..." to fit maxW
+String fitText(String t, const GFXfont* font, int maxW) {
+  if (textWidth(t.c_str(), font) <= maxW) return t;
+  while (t.length() > 1 && textWidth((t + "...").c_str(), font) > maxW) t.remove(t.length() - 1);
+  return t + "...";
+}
+
+void showStatusScreen(const Status& st, int mv) {
+  String frame = st.name.length() && st.name != frameId ? st.name + " (" + frameId + ")" : frameId;
+
+  String battery;
+  bool lowBattery = false;
+  if (mv < 1000) {
+    battery = "On USB power";
+  } else {
+    int pct = constrain((int)lround((mv - 3300) * 100.0 / (4150 - 3300)), 0, 100);  // web/format.js batteryPct
+    lowBattery = pct < 20;
+    char b[40];
+    snprintf(b, sizeof b, lowBattery ? "%d%% (%.2f V), low" : "%d%% (%.2f V)", pct, mv / 1000.0);
+    battery = b;
+  }
+
+  // The network's name, in quotes, then how it went; a long name is shortened, not what follows
+  bool wifiBad = !st.wifiNote.isEmpty() || st.wifi.isEmpty();
+  String wifiAfter = wifiBad ? "\": " + st.wifiNote : String("\", ") +
+      (st.rssi > -60 ? "strong" : st.rssi > -70 ? "good" : st.rssi > -80 ? "weak" : "very weak") + " signal";
+
+  String server;
+  bool serverBad = true;
+  if (st.server == 204 || st.server == 200) {
+    server = "Reached, " + st.pictures + (st.pictures == "1" ? " picture" : " pictures");
+    serverBad = false;
+  } else if (st.server == 401 || st.server == 404) {
+    server = "Frame not registered";
+  } else if (st.server == -100) {
+    server = "Not tried (no Wi-Fi)";
+  } else {
+    server = "No answer";
+  }
+
+  String last = !serverBad ? String("Just now") : st.lastOk.length() ? st.lastOk : String("Never");
+  String firmware = String(FW_VERSION) + ", " PANEL_ID "\" screen";
+
+  drawScreen([&] {
+    int w = screenW(), h = screenH();
+    drawHeader(w);
+    inkText("Frame status", MARGIN, HEAD + 62, &PlexTitle, INK_BLACK);
+    const int valueX = MARGIN + 156, valueW = w - MARGIN - valueX;
+    int y = HEAD + 112;
+    auto row = [&](const char* label, const String& value, bool bad) {
+      inkText(label, MARGIN, y, &PlexLabel, INK_RED);
+      inkText(fitText(value, &PlexBody, valueW).c_str(), valueX, y, &PlexBody, bad ? INK_RED : INK_BLACK);
+      y += 40;
+    };
+    row("FRAME", frame, false);
+    row("BATTERY", battery, lowBattery);
+    String wifi = st.wifi.isEmpty() ? String("None set up yet")
+        : "\"" + fitText(st.wifi, &PlexBody, valueW - textWidth(("\"" + wifiAfter).c_str(), &PlexBody)) + wifiAfter;
+    row("WI-FI", wifi, wifiBad);
+    row("SERVER", server, serverBad);
+    row("LAST CHECK-IN", last, false);
+    row("FIRMWARE", firmware, false);
+    inkText("Press KEY1 to bring the picture back.", MARGIN, max(y + 6, h - 28), &PlexBody, INK_BLACK);
+  });
+  etag = "";  // the picture comes back at the next check-in
+  saveString("etag", etag);
+}
+
 void secureClient(WiFiClientSecure& client) {
 #if VERIFY_TLS
   client.setCACertBundle(CA_BUNDLE);
@@ -929,6 +1013,78 @@ bool connectWifi() {
   return true;
 }
 
+// What every check-in tells the server about the frame
+void addFrameHeaders(HTTPClient& http, int batteryMv) {
+  http.addHeader("X-Device-Key", deviceKey);
+  http.addHeader("X-Battery-Mv", String(batteryMv));
+  http.addHeader("X-Fw", FW_VERSION);
+  if (sizeof FW_SIGNING_KEY > 1) http.addHeader("X-Fw-Env", FW_ENV);  // can take updates
+  http.addHeader("X-Panel", PANEL_ID);  // the server makes pictures this size
+}
+
+// A check-in that got through: when, where the frame hangs (X-Local-Time), for the status screen
+void saveLastCheckIn(HTTPClient& http) {
+  String t = http.header("X-Local-Time");
+  if (t.length() && t.length() < 40) saveString("lastOk", t);
+}
+
+// The status screen's check: a check-in that leaves the picture as it is. Returns the HTTP
+// status (204 from this server), or <= 0 when the server didn't answer.
+int statusCheck(int batteryMv, Status& st) {
+  WiFiClientSecure client;
+  secureClient(client);
+  HTTPClient http;
+  String url = String(SERVER_BASE) + "/api/frames/" + frameId + "/image";
+  if (!http.begin(client, url)) return -1;
+  http.setTimeout(20000);
+  addFrameHeaders(http, batteryMv);
+  http.addHeader("X-Status", "1");
+  const char* keep[] = {"X-Frame-Name", "X-Pictures", "X-Local-Time", "X-Sleep-Minutes", "X-Retry-Minutes"};
+  http.collectHeaders(keep, 5);
+  int code = http.GET();
+  Serial.printf("GET %s (status) -> %d\n", url.c_str(), code);
+  if (code == 204 || code == 200 || code == 304) {
+    checkedIn = true;
+    rtcFailedCheckIns = 0;
+    long mins = http.header("X-Sleep-Minutes").toInt();
+    if (mins >= MIN_SLEEP_MINUTES && mins <= MAX_SLEEP_MINUTES) sleepMinutes = (uint32_t)mins;
+    long retry = http.header("X-Retry-Minutes").toInt();
+    if (retry >= MIN_SLEEP_MINUTES && retry <= MAX_SLEEP_MINUTES) rtcRetryMinutes = (uint32_t)retry;
+    st.name = http.header("X-Frame-Name");
+    st.pictures = http.header("X-Pictures");
+    if (st.pictures.isEmpty()) st.pictures = "some";  // an older server
+    saveLastCheckIn(http);
+  }
+  http.end();  // an older server sends a picture: it isn't read
+  return code;
+}
+
+// Hold KEY2 while pressing reset: try the Wi-Fi and the server, then show how it went. Never
+// opens Wi-Fi setup, so it can tell someone what's wrong first.
+void showStatus(int batteryMv) {
+  Status st;
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  String pass;
+  bool saved = savedWifi(st.wifi, pass);
+  if (saved && connectWifi()) {
+    st.rssi = WiFi.RSSI();
+    st.server = statusCheck(batteryMv, st);
+  } else if (saved) {
+    wl_status_t w = WiFi.status();
+    st.wifiNote = w == WL_NO_SSID_AVAIL ? "can't find it" : w == WL_CONNECT_FAILED ? "wrong password?" : "can't join it";
+  }
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  if (!checkedIn) {
+    prefs.begin("domiframe", true);
+    st.lastOk = prefs.getString("lastOk", "");
+    prefs.end();
+  }
+  st.wifi = st.wifi.substring(0, 32);
+  showStatusScreen(st, batteryMv);
+}
+
 // Returns true if a new picture was drawn.
 bool fetchAndDraw(int batteryMv) {
   WiFiClientSecure client;
@@ -942,16 +1098,13 @@ bool fetchAndDraw(int batteryMv) {
   // into the picture, so it never opens.
   http.useHTTP10(true);
   http.setTimeout(20000);
-  http.addHeader("X-Device-Key", deviceKey);
-  http.addHeader("X-Battery-Mv", String(batteryMv));
-  http.addHeader("X-Fw", FW_VERSION);
-  if (sizeof FW_SIGNING_KEY > 1) http.addHeader("X-Fw-Env", FW_ENV);  // can take updates
-  http.addHeader("X-Panel", PANEL_ID);  // the server makes pictures this size
+  addFrameHeaders(http, batteryMv);
+  if (wantNext) http.addHeader("X-Next", "1");
   if (etag.length()) http.addHeader("If-None-Match", etag);
   if (orientationPending) http.addHeader("X-Set-Orientation", orientation);
   const char* keep[] = {"ETag", "X-Sleep-Minutes", "X-Retry-Minutes", "X-Orientation",
-                        "X-Fw-Update", "X-Fw-Url", "X-Fw-Size", "X-Fw-Sig"};
-  http.collectHeaders(keep, 8);
+                        "X-Fw-Update", "X-Fw-Url", "X-Fw-Size", "X-Fw-Sig", "X-Local-Time"};
+  http.collectHeaders(keep, 9);
 
   int code = http.GET();
   Serial.printf("GET %s -> %d\n", url.c_str(), code);
@@ -971,6 +1124,7 @@ bool fetchAndDraw(int batteryMv) {
     offer.sig = http.header("X-Fw-Sig");
     offer.size = (size_t)http.header("X-Fw-Size").toInt();
     if (orientationPending) saveOrientationPending(false);  // the server has it now
+    saveLastCheckIn(http);
     String o = http.header("X-Orientation");
     if ((o == "landscape" || o == "portrait") && o != orientation) {
       orientation = o;  // changed on the website
@@ -980,7 +1134,7 @@ bool fetchAndDraw(int batteryMv) {
 
   if (code == 401 || code == 404) {
     http.end();
-    showMessage("Frame not registered", "Hold KEY3 and press reset", "to re-enter the frame ID and key.");
+    showMessage("Frame not registered", "Its frame ID or device key is wrong.", "Ask whoever set it up to check them.");
     return false;
   }
   if (code != 200) {  // 304 unchanged, 204 nothing uploaded yet, or error
@@ -1191,7 +1345,7 @@ bool batteryFlat(int mv) {
   return nowFlat;
 }
 
-// This wake is from someone at the frame: the slide switch, the reset button or KEY1. Not a
+// This wake is from someone at the frame: the slide switch, the reset button, KEY1 or KEY2. Not a
 // timer, nor a restart after an update or a brownout.
 bool someoneThere() {
   esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
@@ -1206,9 +1360,12 @@ void goToSleep() {
   digitalWrite(EPD_ENABLE, LOW);
 
   esp_sleep_enable_timer_wakeup((uint64_t)sleepMinutes * 60ULL * 1000000ULL);
-  rtc_gpio_pullup_en((gpio_num_t)BTN_REFRESH);
-  rtc_gpio_pulldown_dis((gpio_num_t)BTN_REFRESH);
-  esp_sleep_enable_ext1_wakeup(1ULL << BTN_REFRESH, ESP_EXT1_WAKEUP_ANY_LOW);  // ESP32-S3: any IDF version
+  for (int pin : {BTN_REFRESH, BTN_NEXT}) {
+    rtc_gpio_pullup_en((gpio_num_t)pin);
+    rtc_gpio_pulldown_dis((gpio_num_t)pin);
+  }
+  // Either button wakes it (ESP32-S3: ANY_LOW works on any IDF version)
+  esp_sleep_enable_ext1_wakeup((1ULL << BTN_REFRESH) | (1ULL << BTN_NEXT), ESP_EXT1_WAKEUP_ANY_LOW);
 
   Serial.printf("sleeping %u min\n", (unsigned)sleepMinutes);
   Serial.flush();
@@ -1226,6 +1383,7 @@ void setup() {
   delay(200);
   pinMode(BTN_SETUP, INPUT_PULLUP);
   pinMode(BTN_REFRESH, INPUT_PULLUP);
+  pinMode(BTN_NEXT, INPUT_PULLUP);
 
   loadSettings();
   sleepMinutes = usualMinutes();  // until the server says otherwise
@@ -1237,12 +1395,21 @@ void setup() {
   if (batteryFlat(mv)) goToSleep();
 
   bool wantSetup = frameId.isEmpty() || deviceKey.isEmpty() || digitalRead(BTN_SETUP) == LOW;
-  // KEY1 held while pressing reset (not a KEY1 wake from sleep): show the frame code again
-  bool wantCode = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED && digitalRead(BTN_REFRESH) == LOW;
+  // KEY1 held while pressing reset (not a KEY1 wake from sleep): show the frame code again.
+  // KEY2 the same way: the status screen. KEY2 pressed while asleep: the next picture.
+  bool pressedReset = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED;
+  bool wantCode = pressedReset && digitalRead(BTN_REFRESH) == LOW;
+  bool wantStatus = pressedReset && digitalRead(BTN_NEXT) == LOW;
+  wantNext = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 &&
+             (esp_sleep_get_ext1_wakeup_status() & (1ULL << BTN_NEXT));
   // A code the server already knows is kept here, so show it without Wi-Fi: someone whose
   // network changed can still read it before redoing setup
   if (wantCode && !wantSetup && !frameCode.isEmpty() && !codePending) {
     showCodeScreen();
+    goToSleep();
+  }
+  if (wantStatus && !wantSetup) {
+    showStatus(mv);
     goToSleep();
   }
 
@@ -1265,7 +1432,7 @@ void setup() {
   if (codePending) {
     int code = registerCode();
     if (code == 200) showCodeScreen();
-    else if (code == 401 || code == 404) showMessage("Frame not registered", "Hold KEY3 and press reset", "to re-enter the frame ID and key.");
+    else if (code == 401 || code == 404) showMessage("Frame not registered", "Its frame ID or device key is wrong.", "Ask whoever set it up to check them.");
     if (!checkedIn) sleepAfterFailedCheckIn();
     goToSleep();  // on a network error, try again next wake (pictures can't arrive before)
   }

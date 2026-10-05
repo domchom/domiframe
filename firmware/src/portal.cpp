@@ -272,7 +272,7 @@ void handleHome() {
                "<p class=hint>Keeps the pictures sent with it. Leave blank for a new code.</p>";
   }
   if (needsDetails) {
-    h += "<span class=label>This frame</span><p class=hint style=margin-top:0>From the admin page at domiframe.art.</p>" + details;
+    h += "<span class=label>This frame</span><p class=hint style=margin-top:0>These come with the frame. If you don&rsquo;t have them, ask whoever gave it to you.</p>" + details;
   } else {
     h += "<details><summary>Frame details</summary>" + details + "</details>";
   }
@@ -322,7 +322,7 @@ void handleConnect() {
     return redirect("/", 303);
   }
   if (!out_->frameId.length() || (!in_->hasKey && !out_->deviceKey.length())) {
-    fail("Enter the frame ID and device key from the admin page.", "");
+    fail("Enter the frame ID and device key that came with the frame.", "");
     resultSeen = true;
     return redirect("/", 303);
   }
@@ -380,7 +380,10 @@ void handleResult() {
     h += "<h1>All set</h1><p class='msg ok'>Your frame is on &ldquo;" + esc(trySsid) + "&rdquo;.</p>";
     h += in_->hasCode && !out_->newCode
              ? "<p>Its picture will be back on the screen in a minute or so.</p>"
-             : "<p>In a minute or so it shows its frame code. Type it at domiframe.art to send it pictures.</p>";
+               // Someone given the frame has never seen its code: say how to send it pictures
+               "<p>To send it pictures from your phone, hold button 1 on the frame and press reset. It shows "
+               "its frame code and a QR code to scan. Or ask whoever gave it to you for its invite link.</p>"
+             :"<p>In a minute or so it shows its frame code. Type it at domiframe.art to send it pictures.</p>";
     h += "<p class=lede>You can close this page.</p>";
     send(h + FOOT);
   } else {
