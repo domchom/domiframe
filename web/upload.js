@@ -269,6 +269,7 @@ function showHang(info) {
   const hang = info.settings.orientation || "landscape";
   $("hang").hidden = false;
   for (const r of document.querySelectorAll("input[name=hang]")) r.checked = r.value === hang;
+  $("hang-flip").checked = !!info.settings.flip;
   // Pictures made for the other orientation would show sideways
   const panel = info.settings.panel || "7.3";
   $("hang-label").textContent = `${panelOf(panel).name} screen, hangs`;
@@ -286,6 +287,10 @@ for (const r of document.querySelectorAll("input[name=hang]")) {
   r.addEventListener("change", () =>
     act(api("settings", jsonReq("PUT", { orientation: r.value })), `Saved. New pictures are made ${r.value}; the frame picks this up at its next check-in.`));
 }
+// Upside down: the frame turns everything it draws, so the pictures stay as they are
+$("hang-flip").addEventListener("change", (e) =>
+  act(api("settings", jsonReq("PUT", { flip: e.target.checked })),
+    e.target.checked ? "Saved. The frame turns its picture upside down at its next check-in." : "Saved. The frame turns its picture the right way up at its next check-in."));
 $("hang-rebuild").addEventListener("click", () => {
   const hang = frameInfo.settings.orientation || "landscape";
   editUploaded(frameInfo.pictures.filter((p) => madeFor(p) !== hang && p.hasOriginal).map((p) => p.id));

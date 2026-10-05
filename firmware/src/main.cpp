@@ -110,12 +110,17 @@ bool wantNext = false;   // woken by KEY2: ask for the next picture
 // already turned for it; this only decides which way up our own messages are drawn.
 String orientation = "landscape";
 bool orientationPending = false;
+// Hung upside down (set on the website, X-Flip): everything is drawn turned 180°, pictures too
+bool flip = false;
 // Newer firmware the server offered at this check-in (X-Fw-Update etc.), if any
 struct { String version, url, sig; size_t size = 0; } offer;
 
 // Hung the other way from how the panel's rows run: messages are turned to read upright
 // (rotation 1, matching how the upload page turns pictures: web/dither.js toPanelOrder).
 bool turned() { return (orientation == "portrait") != NATIVE_PORTRAIT; }
+// The display rotation for our own messages, and for pictures (already in panel order)
+int messageRotation() { return (turned() ? 1 : 0) + (flip ? 2 : 0); }
+int pictureRotation() { return flip ? 2 : 0; }
 
 // ---- QR code ----------------------------------------------------------------
 // ESP-IDF hands the finished code to a callback, so it's copied out here for drawing.
@@ -159,7 +164,7 @@ template <typename Paint>
 void drawScreen(Paint paint) {
   displayPower(true);
   epaper.begin();
-  epaper.setRotation(turned() ? 1 : 0);  // upright however the frame hangs
+  epaper.setRotation(messageRotation());  // upright however the frame hangs
   epaper.fillScreen(TFT_WHITE);
   paint();
   epaper.update();
@@ -187,7 +192,7 @@ int textWidth(const char* text, const GFXfont* font) {  // in screen units, like
 void drawPacked(const uint8_t* buf) {
   displayPower(true);
   epaper.begin();
-  epaper.setRotation(0);  // the picture's bytes are already in panel order
+  epaper.setRotation(pictureRotation());  // the picture's bytes are already in panel order
   for (int y = 0; y < H; y++) {
     const uint8_t* row = buf + (size_t)y * (W / 2);
     for (int x = 0; x < W; x += 2) {
@@ -217,7 +222,7 @@ void drawScreen(Paint paint) {
   display.setFullWindow();
   display.firstPage();
   do {
-    display.setRotation(turned() ? 1 : 0);  // upright however the frame hangs
+    display.setRotation(messageRotation());  // upright however the frame hangs
     display.fillScreen(GxEPD_WHITE);
     paint();
   } while (display.nextPage());
@@ -245,7 +250,8 @@ int textWidth(const char* text, const GFXfont* font) {
 }
 
 void drawPacked(const uint8_t* buf) {
-  displayBegin();  // rotation 0: the picture's bytes are already in panel order
+  displayBegin();
+  display.setRotation(pictureRotation());  // the picture's bytes are already in panel order
   display.setFullWindow();
   display.firstPage();
   do {
@@ -364,6 +370,7 @@ void loadSettings() {
   etag = prefs.getString("etag", "");
   orientation = prefs.getString("orient", "landscape");
   orientationPending = prefs.getBool("orientSet", false);
+  flip = prefs.getBool("flip", false);
   frameCode = prefs.getString("code", "");
   codePending = prefs.getBool("codePend", false);
   prefs.end();
@@ -379,6 +386,16 @@ void saveOrientationPending(bool pending) {
   orientationPending = pending;
   prefs.begin("domiframe", false);
   prefs.putBool("orientSet", pending);
+  prefs.end();
+}
+
+// X-Flip from the server (missing from older ones: left as it is)
+void takeFlip(HTTPClient& http) {
+  String f = http.header("X-Flip");
+  if ((f != "1" && f != "0") || (f == "1") == flip) return;
+  flip = f == "1";
+  prefs.begin("domiframe", false);
+  prefs.putBool("flip", flip);
   prefs.end();
 }
 
@@ -1039,8 +1056,8 @@ int statusCheck(int batteryMv, Status& st) {
   http.setTimeout(20000);
   addFrameHeaders(http, batteryMv);
   http.addHeader("X-Status", "1");
-  const char* keep[] = {"X-Frame-Name", "X-Pictures", "X-Local-Time", "X-Sleep-Minutes", "X-Retry-Minutes"};
-  http.collectHeaders(keep, 5);
+  const char* keep[] = {"X-Frame-Name", "X-Pictures", "X-Local-Time", "X-Sleep-Minutes", "X-Retry-Minutes", "X-Flip"};
+  http.collectHeaders(keep, 6);
   int code = http.GET();
   Serial.printf("GET %s (status) -> %d\n", url.c_str(), code);
   if (code == 204 || code == 200 || code == 304) {
@@ -1054,6 +1071,7 @@ int statusCheck(int batteryMv, Status& st) {
     st.pictures = http.header("X-Pictures");
     if (st.pictures.isEmpty()) st.pictures = "some";  // an older server
     saveLastCheckIn(http);
+    takeFlip(http);
   }
   http.end();  // an older server sends a picture: it isn't read
   return code;
@@ -1102,9 +1120,9 @@ bool fetchAndDraw(int batteryMv) {
   if (wantNext) http.addHeader("X-Next", "1");
   if (etag.length()) http.addHeader("If-None-Match", etag);
   if (orientationPending) http.addHeader("X-Set-Orientation", orientation);
-  const char* keep[] = {"ETag", "X-Sleep-Minutes", "X-Retry-Minutes", "X-Orientation",
+  const char* keep[] = {"ETag", "X-Sleep-Minutes", "X-Retry-Minutes", "X-Orientation", "X-Flip",
                         "X-Fw-Update", "X-Fw-Url", "X-Fw-Size", "X-Fw-Sig", "X-Local-Time"};
-  http.collectHeaders(keep, 9);
+  http.collectHeaders(keep, 10);
 
   int code = http.GET();
   Serial.printf("GET %s -> %d\n", url.c_str(), code);
@@ -1130,6 +1148,7 @@ bool fetchAndDraw(int batteryMv) {
       orientation = o;  // changed on the website
       saveString("orient", orientation);
     }
+    takeFlip(http);
   }
 
   if (code == 401 || code == 404) {

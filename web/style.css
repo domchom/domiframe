@@ -702,6 +702,9 @@ details > summary .meta { margin: 0; }
 .hang-icon { display: inline-block; border: 2px solid currentColor; }
 .hang-icon.wide { width: 16px; height: 10px; }
 .hang-icon.tall { width: 10px; height: 16px; }
+/* Upside down: a thick edge on top, where the chin is when the frame is turned over */
+.hang .hang-flip { grid-column: 1 / -1; }
+.hang-icon.flip { border-top-width: 4px; }
 .hang input:checked + span .hang-icon {
   border-color: var(--ink-red);
   background: conic-gradient(var(--ink-red) 25%, transparent 0 50%, var(--ink-red) 0 75%, transparent 0) 0 0 / 2px 2px;

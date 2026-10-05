@@ -23,6 +23,9 @@
 /* A frame hung portrait: shown upright, as tall as fits */
 .device.portrait { width: fit-content; margin-left: auto; margin-right: auto; }
 .device.portrait #screen { width: auto; height: min(75vh, 800px); }
+/* Hung upside down: the chin is at the top, its label upside down */
+.device.flipped .bezel { display: flex; flex-direction: column-reverse; padding: 0 22px 22px; }
+.device.flipped .chin { transform: rotate(180deg); }
 
 .panels { display: grid; gap: 0 22px; }
 @media (min-width: 820px) { .panels { grid-template-columns: 1fr 1fr; } }

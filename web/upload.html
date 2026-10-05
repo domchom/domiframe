@@ -63,10 +63,11 @@
             <div><dt>Next check-in</dt><dd id="st-next">–</dd></div>
             <div><dt>Battery</dt><dd><span class="gauge" id="st-gauge" aria-hidden="true"></span><span id="st-battery">–</span></dd></div>
           </dl>
-          <div class="hang" id="hang" role="radiogroup" aria-labelledby="hang-label" hidden>
+          <div class="hang" id="hang" role="group" aria-labelledby="hang-label" hidden>
             <span class="eyebrow" id="hang-label">Hangs</span>
             <label><input type="radio" name="hang" value="landscape"><span><i class="hang-icon wide"></i>Landscape</span></label>
             <label><input type="radio" name="hang" value="portrait"><span><i class="hang-icon tall"></i>Portrait</span></label>
+            <label class="hang-flip"><input type="checkbox" id="hang-flip"><span><i class="hang-icon wide flip"></i>Upside down</span></label>
           </div>
         </aside>
       </div>

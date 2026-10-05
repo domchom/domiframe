@@ -213,6 +213,9 @@ test("settings validate orientation", () => {
   assert.equal(mergeSettings({}, {}).settings.orientation, "landscape");
   assert.equal(mergeSettings({}, { orientation: "portrait" }).settings.orientation, "portrait");
   assert.ok(mergeSettings({}, { orientation: "sideways" }).error);
+  assert.equal(mergeSettings({}, {}).settings.flip, false);
+  assert.equal(mergeSettings({}, { flip: true }).settings.flip, true);
+  assert.ok(mergeSettings({}, { flip: 1 }).error);
 });
 
 test("settings validate folder and order", () => {

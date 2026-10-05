@@ -428,6 +428,28 @@ test("the frame's buttons: next picture, and a status check that changes nothing
   assert.notEqual(next.headers.get("etag"), etag);
 });
 
+test("upside down: the frame draws the same picture again, turned", async () => {
+  const f = await newFrame("flipped");
+  await f.upload(1);
+  const first = await f.dev();
+  assert.equal(first.headers.get("x-flip"), "0");
+  const etag = first.headers.get("etag");
+  const bytes = await f.drawn(first);
+
+  assert.equal((await f.call("settings", jsonBody("PUT", { flip: "yes" }))).status, 400);
+  assert.equal((await f.call("settings", jsonBody("PUT", { flip: true }))).status, 200);
+  const turned = await f.dev({ "if-none-match": etag });
+  assert.equal(turned.status, 200, "a new ETag, so the frame redraws it");
+  assert.equal(turned.headers.get("x-flip"), "1");
+  assert.deepEqual(await f.drawn(turned), bytes, "the same picture: the frame turns it itself");
+  assert.equal((await f.dev({ "if-none-match": turned.headers.get("etag") })).status, 304);
+
+  await f.call("settings", jsonBody("PUT", { flip: false }));
+  const back = await f.dev({ "if-none-match": turned.headers.get("etag") });
+  assert.equal(back.status, 200);
+  assert.equal(back.headers.get("etag"), etag);
+});
+
 test("a frame the admin just made has no code yet: nothing opens it", async () => {
   const created = await adminReq("/api/admin/frames", { method: "POST", body: JSON.stringify({ id: "fresh" }) });
   assert.equal(created.status, 201);

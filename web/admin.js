@@ -86,7 +86,7 @@ function render(frames) {
       f.claimed ? "has its frame code" : "waiting for the frame to make its code",
     ].filter(Boolean).join(" · ");
     const hang = f.settings.orientation || "landscape";
-    const pics = el("p", "muted small", `${f.settings.panel || "7.3"}" screen · hangs ${hang} · ` +
+    const pics = el("p", "muted small", `${f.settings.panel || "7.3"}" screen · hangs ${hang}${f.settings.flip ? ", upside down" : ""} · ` +
       `${f.pictures} picture${f.pictures === 1 ? "" : "s"}` +
       (unseen ? ` (${unseen} new)` : "") +
       (f.albums ? ` · ${f.albums} folder${f.albums === 1 ? "" : "s"}` : "") +
@@ -97,7 +97,8 @@ function render(frames) {
     // the frame and the people it's shared with have.
     const actions = el("div", "chips");
     actions.append(
-      button(hang === "portrait" ? "Turn to landscape" : "Turn to portrait", () => turn(f, hang === "portrait" ? "landscape" : "portrait")),
+      button(hang === "portrait" ? "Turn to landscape" : "Turn to portrait", () => turn(f, { orientation: hang === "portrait" ? "landscape" : "portrait" })),
+      button(f.settings.flip ? "Turn right way up" : "Turn upside down", () => turn(f, { flip: !f.settings.flip })),
       button("New device key", () => newKey(f)),
       button("Delete", () => remove(f), "danger"),
     );
@@ -134,9 +135,10 @@ async function newKey(f) {
   load();
 }
 
-/** Change how a frame hangs. New pictures are made for it; existing ones can be rebuilt on its page. */
-async function turn(f, orientation) {
-  const res = await api(`/${f.id}/settings`, { method: "PUT", body: JSON.stringify({ orientation }) });
+/** Change how a frame hangs. New pictures are made for its orientation; existing ones can be
+ *  rebuilt on its page. Upside down, the frame turns them itself. */
+async function turn(f, change) {
+  const res = await api(`/${f.id}/settings`, { method: "PUT", body: JSON.stringify(change) });
   if (!res.ok) return tell("That didn't work", (await res.json().catch(() => ({}))).error || res.statusText);
   load();
 }

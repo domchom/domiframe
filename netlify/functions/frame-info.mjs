@@ -3,7 +3,7 @@
 // exactly as sent, and only someone with the frame code can open them.
 //   GET    /api/frames/:id/info                     -> name, check-ins, battery, settings, folders, pictures
 //   GET    /api/frames/:id/preview                  -> PNG of the picture on the frame now
-//   PUT    /api/frames/:id/settings                 -> { rotateHours, checkMinutes, album, order, quiet, quietStart, quietEnd, tz, name }
+//   PUT    /api/frames/:id/settings                 -> { rotateHours, checkMinutes, album, order, quiet, quietStart, quietEnd, tz, orientation, flip, name }
 //                                                      (name: the frame's own name, plain text, as the admin set it)
 //
 //   GET    /api/frames/:id/pictures/:pic            -> PNG preview

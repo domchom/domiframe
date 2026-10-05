@@ -6,7 +6,9 @@ import { layout, CAP, CODE_GLYPHS, CODE_W, CODE_H } from "/pixelfont.js";
 const $ = (id) => document.getElementById(id);
 // Everything is drawn on a "panel" canvas in the panel's own pixel layout, exactly as the
 // hardware does (7.3": 800×480, 13.3": 1200×1600). The screen shows it upright for how the
-// frame hangs (the server says so in X-Orientation).
+// frame hangs (the server says so in X-Orientation). Hung upside down (X-Flip), the real frame
+// turns what it draws 180° and is itself turned 180°, so the picture still reads upright: here
+// only the chin moves to the top.
 const panel = document.createElement("canvas");
 const ctx = panel.getContext("2d");
 let W = 800, H = 480, screenSize = "7.3";
@@ -20,6 +22,7 @@ function setScreen(id) {
   ctx.fillRect(0, 0, W, H);
 }
 let hang = "landscape";
+let flip = false;
 let hangPending = null; // chosen here, not yet confirmed by the server
 // Same for the screen size. Unlike the firmware (built for one screen, so it always says), the
 // virtual frame only reports a size when one is picked here; otherwise it takes the server's,
@@ -33,6 +36,7 @@ function show() {
   if (screen.width !== w || screen.height !== h) { screen.width = w; screen.height = h; }
   screen.style.aspectRatio = `${w} / ${h}`;
   $("device").classList.toggle("portrait", h > w);
+  $("device").classList.toggle("flipped", flip);
   $("chin-model").textContent = `${PANELS[$("screen-size").value]?.name || ""} Spectra 6`;
   const sctx = screen.getContext("2d");
   // Turn the panel back, so the picture is upright
@@ -459,6 +463,12 @@ async function wake(reason, { next = false } = {}) {
     if (newHang && newHang !== hang) {
       hang = newHang;
       log(`frame hangs ${hang}`);
+      show();
+    }
+    const newFlip = res.headers.get("x-flip") === "1";
+    if (res.headers.has("x-flip") && newFlip !== flip) {
+      flip = newFlip;
+      log(flip ? "frame hangs upside down" : "frame hangs the right way up");
       show();
     }
     $("hang").value = hang;

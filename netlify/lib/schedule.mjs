@@ -27,6 +27,7 @@ export const PANEL_IDS = ["7.3", "13.3"]; // see PANELS in web/dither.js
 export const DEFAULT_SETTINGS = {
   panel: "7.3",             // screen size; the frame reports it on every check-in
   orientation: "landscape", // how the frame hangs; pictures are made for it
+  flip: false,              // hung upside down: the frame turns everything it draws 180°
   rotateHours: 24,
   checkMinutes: 60,
   album: null,        // folder the frame cycles through; null = all pictures
@@ -66,6 +67,10 @@ export function mergeSettings(current, update) {
   if ("orientation" in u) {
     if (!["landscape", "portrait"].includes(u.orientation)) return { error: 'orientation must be "landscape" or "portrait"' };
     s.orientation = u.orientation;
+  }
+  if ("flip" in u) {
+    if (typeof u.flip !== "boolean") return { error: "flip must be true or false" };
+    s.flip = u.flip;
   }
   if ("album" in u) {
     if (u.album !== null && !ALBUM_ID_RE.test(String(u.album))) return { error: "album must be a folder id or null" };

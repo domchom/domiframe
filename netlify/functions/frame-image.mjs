@@ -7,8 +7,9 @@
 //                      X-Status: 1 (the frame's status screen: check in without changing the picture)
 //        -> 200 sealed packed image | 304 unchanged | 204 nothing uploaded yet (or X-Status)
 //        Every reply carries X-Sleep-Minutes (when to check in next), X-Retry-Minutes (the usual
-//        interval, for when a check-in fails), X-Orientation and X-Local-Time (now, where the
-//        frame hangs, for its status screen); an X-Status reply also X-Frame-Name and X-Pictures;
+//        interval, for when a check-in fails), X-Orientation, X-Flip (1: hung upside down, so
+//        the frame turns what it draws 180°) and X-Local-Time (now, where the frame hangs, for
+//        its status screen); an X-Status reply also X-Frame-Name and X-Pictures;
 //        and
 //        when newer firmware is out: X-Fw-Update (version), X-Fw-Url, X-Fw-Size and X-Fw-Sig
 //        (see lib/firmware.mjs).
@@ -91,6 +92,7 @@ async function deviceFetch(req, id, frame) {
     "x-sleep-minutes": String(sleepMinutes),
     "x-retry-minutes": String(retryMinutes(frame.settings, mv)),
     "x-orientation": frame.settings?.orientation || "landscape",
+    "x-flip": frame.settings?.flip ? "1" : "0",
     "x-panel": frame.settings?.panel || "7.3",
     "x-local-time": localTimeLabel(t, frame.settings?.tz),
     ...firmwareHeaders(req.headers.get("x-fw-env"), req.headers.get("x-fw")),
@@ -112,7 +114,8 @@ async function deviceFetch(req, id, frame) {
     return new Response(null, { status: 204, headers: sleep });
   }
 
-  const etag = `"${pic.etag}"`;
+  // Turned upside down since the frame last drew it: a new ETag, so it draws it again
+  const etag = `"${pic.etag}${frame.settings?.flip ? "-flip" : ""}"`;
   if (req.headers.get("if-none-match") === etag) {
     await statusWrite;
     return new Response(null, { status: 304, headers: { etag, ...sleep } });
