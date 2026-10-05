@@ -11,6 +11,44 @@
   to = "/upload.html"
   status = 200
 
+# Short links, for the pages, the box, a printed card or the frame's own screen. Temporary (302)
+# so they can be pointed somewhere else later. scripts/local.mjs follows these too.
+# TODO: the App Store link is a placeholder until the app is live: put its real URL here.
+[[redirects]]
+  from = "/app"
+  to = "https://apps.apple.com/app/domiframe/id0000000000"
+  status = 302
+
+[[redirects]]
+  from = "/setup"
+  to = "/support.html#setup"
+  status = 302
+
+[[redirects]]
+  from = "/help"
+  to = "/support.html"
+  status = 302
+
+[[redirects]]
+  from = "/wifi"
+  to = "/support.html#new-wifi"
+  status = 302
+
+[[redirects]]
+  from = "/gift"
+  to = "/support.html#gift"
+  status = 302
+
+[[redirects]]
+  from = "/buttons"
+  to = "/support.html#buttons"
+  status = 302
+
+[[redirects]]
+  from = "/issues"
+  to = "https://github.com/domchom/domiframe/issues"
+  status = 302
+
 # Security headers for every page and API reply (scripts/local.mjs sends the same ones).
 # The CSP only lets pages run this site's own scripts, and talk only to this site: even if
 # something odd got into a page, it couldn't load code from elsewhere or send a frame code or

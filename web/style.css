@@ -549,7 +549,7 @@ details > summary .meta { margin: 0; }
 .lede { font-size: 17px; line-height: 1.6; margin: 0; max-width: 58ch; }
 .cta { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; margin-top: 24px; }
 .cta button.primary { width: auto; margin: 0; padding: 16px 22px; }
-.cta .chip { display: flex; align-items: center; padding: 0 18px; border-width: 2px; }
+.cta .chip { display: flex; align-items: center; min-height: 48px; padding: 0 18px; border-width: 2px; }
 .sample { margin: 0; }
 .sample .print { margin-right: 8px; }
 .sample figcaption { display: flex; align-items: center; gap: 10px; margin: 18px 0 0; font: 12px/1.5 var(--mono); color: var(--muted); }
@@ -571,6 +571,8 @@ details > summary .meta { margin: 0; }
 .steps b { font: 700 20px/1.2 var(--display); }
 .steps p { margin: 6px 0 0; color: var(--muted); font-size: 15px; }
 
+.app-points { margin: 0; padding-left: 20px; display: grid; gap: 6px; line-height: 1.5; }
+.app-points + .cta { margin-top: 18px; }
 .about-grid { display: grid; gap: 28px; }
 .about-grid dd { max-width: 60%; }
 .notes h3 { margin: 0 0 6px; }

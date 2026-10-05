@@ -104,6 +104,12 @@ const SECURITY_HEADERS = Object.fromEntries(
     .filter(([k]) => k !== "strict-transport-security"),
 );
 
+// The short links (/app, /setup, ...) from netlify.toml's 302 redirects.
+const SHORT_LINKS = Object.fromEntries(
+  [...(await readFile(join(ROOT, "netlify.toml"), "utf8")).matchAll(/from = "(\/[\w-]+)"\s*\n\s*to = "(.*)"\s*\n\s*status = 302/g)]
+    .map(([, from, to]) => [from, to]),
+);
+
 async function serveStatic(pathname) {
   if (pathname.startsWith("/f/")) pathname = "/upload.html"; // netlify.toml redirect
   if (pathname === "/") pathname = "/index.html";
@@ -143,6 +149,7 @@ const server = createServer(async (req, res) => {
       log(req.method, url.pathname, response.status);
       return;
     }
+    if (SHORT_LINKS[url.pathname]) return res.writeHead(302, { ...common, location: SHORT_LINKS[url.pathname] }).end();
     const file = await serveStatic(url.pathname);
     if (!file) {
       const page = url.pathname.startsWith("/api/") ? null : await serveStatic("/404.html"); // like Netlify
