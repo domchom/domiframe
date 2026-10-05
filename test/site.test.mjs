@@ -15,7 +15,11 @@ test("universal links: invite links open the iPhone app", async () => {
 test("short links: every page links the app, and support anchors exist", async () => {
   const toml = await readFile(new URL("../netlify.toml", import.meta.url), "utf8");
   const links = Object.fromEntries([...toml.matchAll(/from = "(\/[\w-]+)"\s*\n\s*to = "(.*)"\s*\n\s*status = 302/g)].map(([, f, t]) => [f, t]));
-  assert.match(links["/app"], /^https:\/\/apps\.apple\.com\//);
+  // The App Store, or the home page's app section until the app is live
+  assert.match(links["/app"], /^(https:\/\/apps\.apple\.com\/|\/#app$)/);
+  if (links["/app"] === "/#app") {
+    assert.match(await readFile(new URL("../web/index.html", import.meta.url), "utf8"), /id="app"/);
+  }
   const support = await readFile(new URL("../web/support.html", import.meta.url), "utf8");
   for (const to of Object.values(links)) {
     const anchor = to.match(/^\/support\.html#(.+)$/)?.[1];

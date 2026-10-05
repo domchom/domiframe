@@ -13,10 +13,11 @@
 
 # Short links, for the pages, the box, a printed card or the frame's own screen. Temporary (302)
 # so they can be pointed somewhere else later. scripts/local.mjs follows these too.
-# TODO: the App Store link is a placeholder until the app is live: put its real URL here.
+# Until the app is on the App Store, /app goes to the home page's app section, which says it's
+# coming. Once it's live, point this at its App Store URL and put the download button back there.
 [[redirects]]
   from = "/app"
-  to = "https://apps.apple.com/app/domiframe/id0000000000"
+  to = "/#app"
   status = 302
 
 [[redirects]]

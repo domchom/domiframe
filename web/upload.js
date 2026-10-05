@@ -171,7 +171,7 @@ $("invite").addEventListener("click", async () => {
   await ask({
     title: `Invite someone to ${frameInfo?.name || "this frame"}`,
     message: "They can scan this with a phone's camera or open the link to send pictures " +
-      "(on iPhone, it opens in the DomiFrame app if they have it: domiframe.art/app). " +
+      "(on iPhone, it opens in the DomiFrame app if they have it). " +
       "It also lets them remove pictures, so only share it with people you trust.",
     body: box, ok: "Done", cancel: null,
   });
