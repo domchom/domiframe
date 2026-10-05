@@ -25,6 +25,7 @@ Most of these numbers came from a photo, so measure your parts first:
 - **`board_len` / `board_wid`** (now 80 × 41.2 mm): the outline of the board.
 - **`usb_x`** (now −25): where the USB-C sits along the slot. This only affects the hole in the door. If the hole ends up on the wrong end, flip the sign.
 - **`usb_above_pcb`** (3.0 mm): how far the centre of the USB-C port sits above the top of the PCB. The slot is centred on this height.
+- **`buttons`**: where RESET, 1, 2 and 3 sit along the board's button edge (model X), for the labels engraved into the back plate under each one. The numbers now are guesses; set `button_labels = false` to leave them off.
 - **`aa_top`** (5 mm): the gap between the top edge of the glass and the top of the image area. The bottom border, on the FPC side, works out to 10 mm, and each side to 4.5 mm.
 
 The quickest check is to print only a strip of the top wall and hold your board against it.
@@ -49,6 +50,8 @@ In the OpenSCAD app, open **Window → Customizer** and pick a part from the **P
 4. Connect the extension ribbon from the board to the panel tail, then plug in the battery.
 5. Lower the plate into the back of the frame, top edge first, so the buttons and USB-C slide under the slot. Fix it with 6 × M2 × 6 countersunk self-tapping screws.
 6. Press the door into the slot.
+
+The back plate says what each button does, under the button: **RESET**, **1 CHECK** (check for pictures now; hold it while pressing reset to show the frame code), **2 NEXT** (the next picture now; hold it while pressing reset for the frame's status) and **3 SETUP** (hold it while pressing reset to open Wi-Fi setup).
 
 The pads in the corners and on the sides stop 0.3 mm short of the panel. A thin strip of foam on each pad keeps the panel from rattling.
 

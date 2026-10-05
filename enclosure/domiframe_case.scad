@@ -62,6 +62,13 @@ board_gap = 0.3;         // board edge to that wall
 
 usb_x = -25;             // USB-C centre, model X (mirror if it lands wrong)
 usb_above_pcb = 3.0;     // USB-C centre above the PCB top
+// What each button does, engraved into the back plate right under it, reading down from the top
+// edge. [centre along the board's button edge (model X), label]. The board prints 1, 2, 3 and
+// RESET on them; measure where yours are before printing.
+button_labels = true;
+buttons = [[-5, "RESET"], [5.5, "1 CHECK"], [16, "2 NEXT"], [26.5, "3 SETUP"]];
+label_size = 2.6;
+label_depth = 0.6;
 slot_len = 80;
 slot_h = 8.5;
 
@@ -248,6 +255,12 @@ module back() {
 
         for (p = board_holes) translate([p[0], p[1], pcb_back_z - eps]) cylinder(d = screw_pilot, h = standoff_h + plate_t - 0.6);
 
+        // button labels on the outside, each with a mark pointing up at its button
+        if (button_labels) for (b = buttons) translate([b[0], ph / 2, D - label_depth]) linear_extrude(label_depth + eps) {
+            translate([0, -1.5]) polygon([[-1.2, -1.6], [1.2, -1.6], [0, 0]]);
+            translate([0, -4.6]) rotate(-90) text(b[1], size = label_size, font = "Liberation Sans:style=Bold", halign = "left", valign = "center");
+        }
+
         // countersunk M2 holes into the frame
         for (p = frame_screw) translate([p[0], p[1], plate_in_z - eps]) {
             cylinder(d = screw_clear, h = plate_t + 1);
@@ -331,7 +344,7 @@ module board_dummy() {
             for (p = board_holes) translate([p[0], p[1] - board_cy]) circle(d = 2.4);
         }
         color("silver") translate([usb_x, board_wid / 2 - 2.5, -usb_above_pcb - 1.6]) cube([9, 7.5, 3.2], center = true);
-        color("black") for (i = [0:3]) translate([-5 + i * 10.5, board_wid / 2 - 2.5, -1.8]) cube([6, 3.5, 3.6], center = true);
+        color("black") for (b = buttons) translate([b[0], board_wid / 2 - 2.5, -1.8]) cube([6, 3.5, 3.6], center = true);
         color("black") translate([33, board_wid / 2 - 2.5, -1.5]) cube([8, 4, 3], center = true);
     }
 }
