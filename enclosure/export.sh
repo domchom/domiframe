@@ -1,11 +1,11 @@
 #!/bin/sh
 # Export every printable part of the case to stl/.
-#   ./export.sh              frame, back and door
-#   ./export.sh back door    only the parts named
+#   ./export.sh              frame, back, buttons, fit_test, rail and stand
+#   ./export.sh back buttons only the parts named
 set -e
 cd "$(dirname "$0")"
 OPENSCAD=${OPENSCAD:-/Applications/OpenSCAD.app/Contents/MacOS/OpenSCAD}
-[ $# -gt 0 ] || set -- frame back door
+[ $# -gt 0 ] || set -- frame back buttons fit_test rail stand
 mkdir -p stl
 for part in "$@"; do
   echo "exporting $part"
