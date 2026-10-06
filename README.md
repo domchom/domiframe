@@ -30,12 +30,13 @@ Each frame keeps up to 200 pictures, optionally sorted into folders; the frame c
 |---|---|
 | `web/` | Static site: home page (about + My frame), friend upload page, dithering (`dither.js`), encryption (`seal.js`), virtual frame (`sim.html`) |
 | `netlify/functions/` | API endpoints |
+| `netlify/edge-functions/invite-preview.js` | Invite links (`/f/<id>`) as a rich link in Messages etc.: the frame's ID in the preview tags, and the invite card `web/og-invite.png` (the home page's photo, in a frame). The code, after the `#`, never reaches the server |
 | `netlify/lib/common.mjs` | Shared helpers (stores, key hashing, picture queue storage) |
 | `netlify/lib/schedule.mjs` | Which picture to show and when the frame wakes (pure functions) |
 | `web/admin.html` | Admin page: create frames, see battery and check-ins, replace keys |
 | `firmware/` | PlatformIO project for the EE04 |
 | `test/` | `npm test`: dithering, scheduling, full API flow against a local Blobs server |
-| `scripts/` | `npm run local`: local server + virtual frame; `make-icons.py` redraws the favicons and link-preview image |
+| `scripts/` | `npm run local`: local server + virtual frame; `make-icons.py` redraws the favicons and link-preview images |
 | `.github/workflows/ci.yml` | Runs the tests and compiles the firmware on every push |
 
 ## API

@@ -1,4 +1,4 @@
-# Draws the site's icons and link-preview image in the frame's six inks, as pixel art:
+# Draws the site's icons and link-preview images in the frame's six inks, as pixel art:
 #   python3 scripts/make-icons.py [path/to/IBMPlexSansCondensed-Bold.ttf] [path/to/IBMPlexMono-Medium.ttf]
 # Needs Pillow and numpy. Writes into web/. The fonts are only for the preview image
 # (fonts.google.com/specimen/IBM+Plex+Sans+Condensed); without them it falls back to Helvetica.
@@ -102,7 +102,14 @@ def font(path, size, fallback="/System/Library/Fonts/Helvetica.ttc"):
         print(f"warning: can't open font {path!r}, using Helvetica for og.png", file=sys.stderr)
         return ImageFont.truetype(fallback, size)
 
-def og_image(display_font, mono_font):
+# The site's card, and the one invite links get (netlify/edge-functions/invite-preview.js)
+HOME = (["Pictures from the people", "you love, printed in ink", "that stays put."],
+        "domiframe.art · color e-paper photo frames", "Six inks. Every other color is made of dots.")
+INVITE = (["You're invited to send", "pictures to this frame."],
+          "Open the link to send photos · domiframe.art", "It shows them in six inks, made of dots.")
+
+def og_image(display_font, mono_font, text=HOME):
+    lines, footer, caption = text
     W, H, M = 1200, 630, 72
     img = Image.new("RGB", (W, H), INK["w"])
     d = ImageDraw.Draw(img)
@@ -136,11 +143,11 @@ def og_image(display_font, mono_font):
     # Headline and line
     hf = font(display_font, 50)
     y = M + word.height + 26
-    for line in ["Pictures from the people", "you love, printed in ink", "that stays put."]:
+    for line in lines:
         d.text((M, y), line, font=hf, fill=INK["k"])
         y += 60
     mf = font(mono_font, 22)
-    d.text((M, H - M - 22), "domiframe.art · color e-paper photo frames", font=mf, fill=(92, 97, 102))
+    d.text((M, H - M - 22), footer, font=mf, fill=(92, 97, 102))
 
     # The sample photo in the frame's shape, dithered like the upload page's defaults
     # (contrast 1.1, color boost 1.3), 2 px per dot, in a print with a black border
@@ -160,7 +167,7 @@ def og_image(display_font, mono_font):
     d.rectangle([bx0, by0, bx1, by1], fill=(251, 251, 248), outline=INK["k"], width=3)
     img.paste(pic, (bx0 + mat + 1, by0 + mat + 1))
     cf = font(mono_font, 17)
-    d.text((bx0, by1 + 26), "Six inks. Every other color is made of dots.", font=cf, fill=(92, 97, 102))
+    d.text((bx0, by1 + 26), caption, font=cf, fill=(92, 97, 102))
 
     # Ink strip under the headline: the six inks with ordered-dither blends
     order = [INK[c] for c in "kbgyrw"]
@@ -190,4 +197,5 @@ if __name__ == "__main__":
     # maskable: the mark inside the middle 80% circle, so any mask shape keeps it whole
     render(g, 18, 512, INK["w"]).convert("RGB").save(WEB / "icon-maskable.png")
     og_image(display_font, mono_font).save(WEB / "og.png", optimize=True)
-    print("wrote icons and og.png to", WEB)
+    og_image(display_font, mono_font, INVITE).save(WEB / "og-invite.png", optimize=True)
+    print("wrote icons, og.png and og-invite.png to", WEB)

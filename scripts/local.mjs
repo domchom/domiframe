@@ -32,6 +32,7 @@ const frameAlerts = (await import("../netlify/functions/frame-alerts.mjs")).defa
 const { runAlerts } = await import("../netlify/functions/send-alerts.mjs");
 const { sendTo } = await import("../netlify/lib/push.mjs");
 const { loadFrame } = await import("../netlify/lib/common.mjs");
+const { invitePage } = await import("../netlify/edge-functions/invite-preview.js");
 globalThis.__domiframeClockOffset = 0;
 
 // Same routes as the functions' `config.path`.
@@ -151,6 +152,8 @@ const server = createServer(async (req, res) => {
     }
     if (SHORT_LINKS[url.pathname]) return res.writeHead(302, { ...common, location: SHORT_LINKS[url.pathname] }).end();
     const file = await serveStatic(url.pathname);
+    // The invite preview edge function, on /f/<id>
+    if (file && url.pathname.startsWith("/f/")) file.body = invitePage(file.body.toString(), url.pathname.split("/")[2] || "");
     if (!file) {
       const page = url.pathname.startsWith("/api/") ? null : await serveStatic("/404.html"); // like Netlify
       res.writeHead(404, { ...common, "content-type": page ? page.type : "text/plain" }).end(page ? page.body : "not found");

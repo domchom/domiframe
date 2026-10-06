@@ -30,3 +30,17 @@ test("short links: every page links the app, and support anchors exist", async (
     assert.match(html, /href="\/app"/, `${page}.html links the app`);
   }
 });
+
+test("invite links: a rich link that names the frame, and nothing more", async () => {
+  const { invitePage } = await import("../netlify/edge-functions/invite-preview.js");
+  const html = await readFile(new URL("../web/upload.html", import.meta.url), "utf8");
+  const page = invitePage(html, "gran-kitchen");
+  assert.match(page, /<meta property="og:title" content="Send pictures to the frame “gran-kitchen”">/);
+  assert.match(page, /<meta property="og:image" content="https:\/\/domiframe\.art\/og-invite\.png">/);
+  await readFile(new URL("../web/og-invite.png", import.meta.url)); // the card exists
+  assert.match(page, /<title>gran-kitchen · DomiFrame<\/title>/);
+  assert.doesNotMatch(page, /og:url/, "an app could open og:url instead, without the code");
+  // Anything that isn't a frame ID is left out
+  assert.equal(invitePage(html, "<script>"), html);
+  assert.equal(invitePage(html, "Gran%22"), html);
+});
