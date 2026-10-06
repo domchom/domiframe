@@ -1056,14 +1056,20 @@ const commonLook = () => summarizeLooks().common;
 const looksDifferent = (p) => (lookSummary || summarizeLooks()).differs.has(p);
 
 async function pickFiles(list) {
-  if (busySending) return;
+  awaitingPick = false;
+  if (busySending) return hideOpening();
   msg("");
   const all = [...list];
   const imgs = all.filter(isImage).sort(byName);
   if (!imgs.length) {
+    hideOpening();
     msg(all.length ? "No photos found there." : "", "err");
     return;
   }
+  const n = imgs.length;
+  showOpening(n > 1 ? `Opening ${n} photos…` : "Opening your photo…",
+    n >= BIG_SET ? `That's a lot of photos, so <b>this takes a little while</b>. The rest keep loading in the strip once the first one's up.` : "");
+  await new Promise((r) => requestAnimationFrame(() => setTimeout(r))); // let it draw before the work starts
   forgetPhotos();
   const look = readLook(); // start from whatever look is set now
   let showDate = false, corner = "br";
@@ -1081,10 +1087,12 @@ async function pickFiles(list) {
   thumbnailAll();
   for (let i = 0; i < photos.length; i++) {
     if (await select(i)) {
+      hideOpening();
       $("editor").hidden = false;
       return;
     }
   }
+  hideOpening();
   msg("Couldn't open those photos. Try JPEG or PNG.", "err");
 }
 
@@ -1248,8 +1256,14 @@ function makeThumb(p, canvas) {
 /** Thumbnails for photos not opened yet, one at a time in the background. */
 async function thumbnailAll() {
   const list = photos;
+  const left = $("thumbs-left");
+  let done = 0;
   for (const p of list) {
     if (list !== photos) return; // a new set was picked
+    done++;
+    // A big set fills the strip slowly, so count it in
+    left.hidden = list.length < BIG_SET || done === list.length;
+    left.textContent = `loading ${done} of ${list.length}`;
     if (p.thumb || p.broken) continue;
     try {
       // Decoding straight to a small size is cheap; the browser can skip most of the pixels
@@ -1508,6 +1522,39 @@ function showBatchNote() {
 
 $("file").addEventListener("change", (e) => pickFiles(e.target.files));
 $("folder").addEventListener("change", (e) => pickFiles(e.target.files));
+
+// ---- Opening photos -------------------------------------------------------------
+// A big pick takes a while: the phone prepares every photo (HEIC to JPEG, out of iCloud) before
+// the page gets any of them, then the first one has to open. Show that something's happening.
+
+const BIG_SET = 25; // from here on, say that it takes a while
+const SLOW_NOTE = "Picked a lot? Your phone prepares each photo before handing it over, so <b>this can take a minute or two</b>. Keep this page open.";
+
+function showOpening(title, note = "", stoppable = false) {
+  $("opening-title").textContent = title;
+  $("opening-note").innerHTML = note; // only ever our own text
+  $("opening-stop").hidden = !stoppable;
+  $("opening").hidden = false;
+}
+function hideOpening() {
+  $("opening").hidden = true;
+}
+
+// Between choosing and the photos arriving there's no event, only the page coming back. If
+// nothing (photos or a cancel) has come soon after that, they're still being prepared.
+let awaitingPick = false;
+for (const id of ["file", "folder"]) {
+  $(id).addEventListener("click", () => { awaitingPick = !busySending; });
+  $(id).addEventListener("cancel", () => { awaitingPick = false; hideOpening(); });
+}
+function backFromPicker() {
+  if (!awaitingPick) return;
+  setTimeout(() => awaitingPick && showOpening("Getting your photos…", SLOW_NOTE, true), 400);
+}
+window.addEventListener("focus", backFromPicker);
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && backFromPicker());
+// Not every browser says when the picker was cancelled
+$("opening-stop").addEventListener("click", () => { awaitingPick = false; hideOpening(); });
 // Folder picking isn't available everywhere (e.g. iPhone); there, "Choose photos" allows several.
 if (!("webkitdirectory" in document.createElement("input")) || /iPhone|iPad|Android/i.test(navigator.userAgent)) {
   $("folder-picker").hidden = true;

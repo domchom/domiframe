@@ -326,6 +326,78 @@ input[type=range]:active::-moz-range-thumb { background: var(--accent); border-c
 .picker.off:hover span { border-style: dashed; color: var(--muted); background: radial-gradient(var(--soft-line) .8px, transparent 1px) 0 0 / 4px 4px; }
 .picker.off:hover span em { background: none; padding: 0; }
 
+/* Opening photos: a tiny frame whose screen does what the real panel does on a refresh. It
+   flashes black and white to clear, shows each ink in bands, then the picture wipes in. All in
+   steps, never smooth: e-paper can't fade. */
+.pickers:has(+ .opening:not([hidden])) { display: none; }
+.opening {
+  display: flex; align-items: center; gap: 24px; min-height: 120px; padding: 20px;
+  border: 2px solid var(--ink);
+  background: radial-gradient(var(--soft-line) .8px, transparent 1px) 0 0 / 4px 4px;
+}
+.opening[hidden] { display: none; }
+.opening-frame {
+  flex: none; width: 112px; height: 80px; padding: 8px; background: var(--ink-black);
+  border: 2px solid var(--ink);
+}
+.opening-screen { position: relative; display: block; height: 100%; overflow: hidden; animation: refresh 3.2s steps(1, end) infinite; }
+.opening-screen::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    conic-gradient(var(--ink-blue) 25%, transparent 0 50%, var(--ink-blue) 0 75%, transparent 0) 0 0 / 2px 2px,
+    linear-gradient(var(--ink-blue) 0 30%, var(--ink-white) 0 55%, var(--ink-yellow) 0 70%, var(--ink-green) 0);
+  /* a sun in the corner, a dithered sky, a field: the picture the screen settles on */
+  animation: wipe-in 3.2s steps(1, end) infinite;
+}
+.opening-screen::before {
+  content: ""; position: absolute; z-index: 1; width: 14px; height: 14px; right: 16%; top: 14%;
+  background: var(--ink-red); border-radius: 50%;
+  animation: sun 3.2s steps(1, end) infinite;
+}
+@keyframes refresh {
+  0%   { background: var(--ink-white); }
+  6%   { background: var(--ink-black); }
+  12%  { background: var(--ink-white); }
+  18%  { background: var(--ink-black); }
+  24%  { background: linear-gradient(90deg, var(--ink-black) 0 16.66%, var(--ink-white) 0 33.33%, var(--ink-yellow) 0 50%,
+                                             var(--ink-red) 0 66.66%, var(--ink-blue) 0 83.33%, var(--ink-green) 0); }
+  32%  { background: linear-gradient(90deg, var(--ink-green) 0 16.66%, var(--ink-black) 0 33.33%, var(--ink-white) 0 50%,
+                                             var(--ink-yellow) 0 66.66%, var(--ink-red) 0 83.33%, var(--ink-blue) 0); }
+  40%  { background: var(--ink-white); }
+}
+/* The picture comes in top to bottom in a few hard rows, holds, then the whole thing repeats */
+@keyframes wipe-in {
+  0%, 40% { clip-path: inset(0 0 100% 0); }
+  46% { clip-path: inset(0 0 75% 0); }
+  52% { clip-path: inset(0 0 50% 0); }
+  58% { clip-path: inset(0 0 25% 0); }
+  64%, 100% { clip-path: inset(0); }
+}
+@keyframes sun { 0%, 64% { visibility: hidden; } 70%, 100% { visibility: visible; } }
+.opening-text { min-width: 0; }
+.opening-text p { margin: 0; }
+.opening-title { font: 700 24px/1.15 var(--display); }
+/* The six inks, taking turns, like a cursor that can't decide on a color */
+.opening-inks { display: flex; gap: 4px; margin: 10px 0 !important; }
+.opening-inks i { width: 10px; height: 10px; border: 1.5px solid var(--ink); animation: ink-turn 1.8s steps(1, end) infinite; }
+.opening-inks i:nth-child(1) { --c: var(--ink-black); }
+.opening-inks i:nth-child(2) { --c: var(--ink-white); animation-delay: .3s; }
+.opening-inks i:nth-child(3) { --c: var(--ink-yellow); animation-delay: .6s; }
+.opening-inks i:nth-child(4) { --c: var(--ink-red); animation-delay: .9s; }
+.opening-inks i:nth-child(5) { --c: var(--ink-blue); animation-delay: 1.2s; }
+.opening-inks i:nth-child(6) { --c: var(--ink-green); animation-delay: 1.5s; }
+@keyframes ink-turn { 0% { background: var(--c); } 34% { background: transparent; } }
+.opening-note { font: 12px/1.5 var(--mono); color: var(--muted); max-width: 46ch; }
+.opening-note:empty { display: none; }
+.opening-note b { color: var(--ink); font-weight: 600; }
+#opening-stop { margin-top: 6px; }
+@media (prefers-reduced-motion: reduce) {
+  .opening-screen, .opening-screen::after, .opening-screen::before, .opening-inks i { animation: none; }
+  .opening-inks i { background: var(--c); }
+}
+/* Thumbnails still coming in for a big set */
+.thumbs-left { font: 500 11px/1 var(--mono); color: var(--muted); letter-spacing: .04em; margin-left: 8px; white-space: nowrap; }
+
 /* ---- Editor -------------------------------------------------------------------- */
 
 #editor { margin-top: 24px; }
@@ -664,6 +736,9 @@ details > summary .meta { margin: 0; }
   h2 { font-size: 28px; }
   .hero h1 { font-size: 52px; }
   .pickers { flex-direction: column; }
+  .opening { gap: 16px; padding: 16px; }
+  .opening-frame { width: 84px; height: 62px; padding: 6px; }
+  .opening-title { font-size: 20px; }
   .picker span { min-height: 88px; }
   .presets { gap: 4px; }
   .presets button { font-size: 9px; letter-spacing: .04em; }
