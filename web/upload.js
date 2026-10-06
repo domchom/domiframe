@@ -1534,10 +1534,69 @@ function showOpening(title, note = "", stoppable = false) {
   $("opening-title").textContent = title;
   $("opening-note").innerHTML = note; // only ever our own text
   $("opening-stop").hidden = !stoppable;
-  $("opening").hidden = false;
+  if ($("opening").hidden) {
+    $("opening").hidden = false;
+    animateOpening();
+  }
 }
 function hideOpening() {
   $("opening").hidden = true;
+  cancelAnimationFrame(openingFrame);
+}
+
+// The little screen: the six inks in bands (in the order of the site's ink bar), sliding right a
+// band a second. Every few seconds they stop, the lines between them dither into blends and
+// back, and they move on. Redrawn in steps, never smooth, as e-paper would.
+const OPENING_INKS = [0, 4, 5, 2, 3, 1].map((i) => PALETTE[i].rgb); // black blue green yellow red white
+const OPENING = { move: 3, dither: 1.2, hold: 0.6, undither: 1.2, step: 0.1 }; // seconds; the app matches
+const OPENING_CYCLE = OPENING.move + OPENING.dither + OPENING.hold + OPENING.undither;
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
+let openingFrame = 0;
+
+/** Where the bands are (in bands, 0 to 6) and how far the lines are dithered (0 to 1) at time t. */
+function openingAt(t) {
+  const { move, dither, hold, undither } = OPENING;
+  const n = Math.floor(t / OPENING_CYCLE), c = t - n * OPENING_CYCLE;
+  const offset = (n * move + Math.min(c, move)) % 6;
+  const blend = c < move ? 0
+    : c < move + dither ? (c - move) / dither
+    : c < move + dither + hold ? 1
+    : Math.max(0, 1 - (c - move - dither - hold) / undither);
+  return { offset, blend: Math.round(blend * 8) / 8 }; // eight hard steps each way
+}
+
+function drawOpening(canvas, { offset, blend }) {
+  const w = Math.max(12, Math.round(canvas.clientWidth / 2)), h = Math.max(4, Math.round(canvas.clientHeight / 2)); // 2 px dots
+  if (canvas.width !== w || canvas.height !== h) Object.assign(canvas, { width: w, height: h });
+  const ctx = canvas.getContext("2d");
+  const img = ctx.createImageData(w, h), px = img.data;
+  const band = w / 6, shift = Math.floor(offset * band);
+  for (let x = 0; x < w; x++) {
+    // From the middle of band i to the middle of the next: a hard line halfway, or a Bayer blend
+    const u = (x - shift) / band - 0.5, i = Math.floor(u), f = u - i;
+    const mix = blend ? Math.min(1, Math.max(0, (f - 0.5) / blend + 0.5)) : f >= 0.5 ? 1 : 0;
+    for (let y = 0; y < h; y++) {
+      const ink = OPENING_INKS[(((mix > BAYER[(y & 3) * 4 + (x & 3)] ? i + 1 : i) % 6) + 6) % 6];
+      const k = (y * w + x) * 4;
+      px[k] = ink[0]; px[k + 1] = ink[1]; px[k + 2] = ink[2]; px[k + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function animateOpening() {
+  const canvas = $("opening-screen");
+  cancelAnimationFrame(openingFrame);
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return drawOpening(canvas, { offset: 0, blend: 0 });
+  drawOpening(canvas, openingAt(0)); // right away, not a blank screen until the next frame
+  const start = performance.now();
+  let last = 0;
+  const tick = (now) => {
+    const step = Math.floor((now - start) / 1000 / OPENING.step);
+    if (step !== last) drawOpening(canvas, openingAt((last = step) * OPENING.step));
+    openingFrame = requestAnimationFrame(tick);
+  };
+  openingFrame = requestAnimationFrame(tick);
 }
 
 // Between choosing and the photos arriving there's no event, only the page coming back. If

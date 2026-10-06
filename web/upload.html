@@ -88,12 +88,11 @@
           <span><em>Choose a folder</em><small>everything inside it</small></span>
         </label>
       </div>
-      <!-- While photos arrive and open: a little panel doing its refresh flash -->
+      <!-- While photos arrive and open: a little panel, its inks sliding across -->
       <div class="opening" id="opening" role="status" aria-live="polite" hidden>
-        <div class="opening-frame" aria-hidden="true"><i class="opening-screen"></i></div>
+        <div class="opening-frame" aria-hidden="true"><canvas class="opening-screen" id="opening-screen"></canvas></div>
         <div class="opening-text">
           <p class="opening-title" id="opening-title">Getting your photos…</p>
-          <p class="opening-inks" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></p>
           <p class="opening-note" id="opening-note"></p>
           <button type="button" class="link small" id="opening-stop" hidden>Stop waiting</button>
         </div>
