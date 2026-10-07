@@ -20,6 +20,10 @@
 // Hold KEY1 while pressing reset to show the code again; the setup portal can make a new one,
 // or take back the code the frame had (the server then brings back the pictures sealed with it).
 //
+// Stay awake: on USB power, with "Stay awake when plugged in" on (Frame settings), the frame
+// doesn't sleep. It keeps Wi-Fi up and checks in every 5 minutes (X-Awake-Seconds), so new photos
+// go up within 5 minutes of being sent. Unplugged, or in quiet hours, it sleeps as usual.
+//
 // KEY2: press it and the frame wakes and puts up the next picture (X-Next). Hold it while
 // pressing reset for the status screen: Wi-Fi, server, battery and the last check-in.
 //
@@ -105,6 +109,9 @@ bool codePending = false;  // made but not yet registered with the server
 uint32_t sleepMinutes = SLEEP_MINUTES;
 bool checkedIn = false;  // the server answered this wake's check-in
 bool wantNext = false;   // woken by KEY2: ask for the next picture
+// Plugged in with "stay awake" on: check in again after this long instead of sleeping
+// (X-Awake-Seconds, from this wake's check-in; 0 = sleep as usual)
+uint32_t awakeSeconds = 0;
 // How the frame hangs: "landscape" or "portrait". Chosen in the setup portal (sent to the server
 // until it confirms), otherwise whatever the server says (set on the website). Pictures arrive
 // already turned for it; this only decides which way up our own messages are drawn.
@@ -360,6 +367,9 @@ int readBatteryMv() {
   digitalWrite(BAT_ADC_ENABLE_PIN, LOW);
   return (int)((sum / 8.0f) / 4096.0f * BAT_SCALE * 1000.0f);
 }
+
+// No battery reading: running on USB power (as the status screen says)
+bool onUsb(int mv) { return mv < 1000; }
 
 // ---------------------------------------------------------------------------
 
@@ -837,7 +847,7 @@ void showStatusScreen(const Status& st, int mv) {
 
   String battery;
   bool lowBattery = false;
-  if (mv < 1000) {
+  if (onUsb(mv)) {
     battery = "On USB power";
   } else {
     int pct = constrain((int)lround((mv - 3300) * 100.0 / (4150 - 3300)), 0, 100);  // web/format.js batteryPct
@@ -1037,6 +1047,7 @@ void addFrameHeaders(HTTPClient& http, int batteryMv) {
   http.addHeader("X-Fw", FW_VERSION);
   if (sizeof FW_SIGNING_KEY > 1) http.addHeader("X-Fw-Env", FW_ENV);  // can take updates
   http.addHeader("X-Panel", PANEL_ID);  // the server makes pictures this size
+  if (onUsb(batteryMv)) http.addHeader("X-Power", "usb");  // can stay awake
 }
 
 // A check-in that got through: when, where the frame hangs (X-Local-Time), for the status screen
@@ -1121,8 +1132,8 @@ bool fetchAndDraw(int batteryMv) {
   if (etag.length()) http.addHeader("If-None-Match", etag);
   if (orientationPending) http.addHeader("X-Set-Orientation", orientation);
   const char* keep[] = {"ETag", "X-Sleep-Minutes", "X-Retry-Minutes", "X-Orientation", "X-Flip",
-                        "X-Fw-Update", "X-Fw-Url", "X-Fw-Size", "X-Fw-Sig", "X-Local-Time"};
-  http.collectHeaders(keep, 10);
+                        "X-Fw-Update", "X-Fw-Url", "X-Fw-Size", "X-Fw-Sig", "X-Local-Time", "X-Awake-Seconds"};
+  http.collectHeaders(keep, 11);
 
   int code = http.GET();
   Serial.printf("GET %s -> %d\n", url.c_str(), code);
@@ -1134,6 +1145,8 @@ bool fetchAndDraw(int batteryMv) {
     if (mins >= MIN_SLEEP_MINUTES && mins <= MAX_SLEEP_MINUTES) sleepMinutes = (uint32_t)mins;
     long retry = http.header("X-Retry-Minutes").toInt();  // missing from older servers
     if (retry >= MIN_SLEEP_MINUTES && retry <= MAX_SLEEP_MINUTES) rtcRetryMinutes = (uint32_t)retry;
+    long awake = http.header("X-Awake-Seconds").toInt();  // only while plugged in, with stay awake on
+    awakeSeconds = awake >= MIN_AWAKE_SECONDS && awake <= MAX_AWAKE_SECONDS ? (uint32_t)awake : 0;
     // This firmware got through to the server: keep it (after an update, an image that can't
     // would be rolled back to the one before, where the bootloader supports that)
     esp_ota_mark_app_valid_cancel_rollback();
@@ -1255,7 +1268,7 @@ uint32_t versionNumber(const String& v) {
 // as it is, to try again at a later check-in. The picture on the screen stays up throughout.
 void installUpdate(int batteryMv) {
   if (versionNumber(offer.version) <= versionNumber(FW_VERSION) || !offer.url.startsWith("/firmware/") || !offer.size) return;
-  if (batteryMv > 1000 && batteryMv < MIN_UPDATE_MV) {
+  if (!onUsb(batteryMv) && batteryMv < MIN_UPDATE_MV) {
     Serial.printf("update %s waits for more battery\n", offer.version.c_str());
     return;
   }
@@ -1352,8 +1365,7 @@ bool batteryFlat(int mv) {
   bool flat = prefs.getBool("flat", false);
   prefs.end();
 
-  bool onUsb = mv < 1000;  // no battery connected
-  bool nowFlat = !onUsb && mv < (flat ? RESUME_MV : FLAT_MV);  // charged well up before it counts
+  bool nowFlat = !onUsb(mv) && mv < (flat ? RESUME_MV : FLAT_MV);  // charged well up before it counts
   if (nowFlat != flat) {
     Serial.printf(nowFlat ? "battery empty (%d mV)\n" : "battery back to %d mV\n", mv);
     prefs.begin("domiframe", false);
@@ -1371,6 +1383,34 @@ bool someoneThere() {
   if (cause == ESP_SLEEP_WAKEUP_EXT1) return true;
   esp_reset_reason_t r = esp_reset_reason();
   return cause == ESP_SLEEP_WAKEUP_UNDEFINED && (r == ESP_RST_POWERON || r == ESP_RST_EXT);
+}
+
+// Plugged in with "stay awake" on: instead of sleeping, keep Wi-Fi up and check in again every
+// awakeSeconds, so a picture sent from a phone goes up within a few minutes. KEY1 checks in at once,
+// KEY2 asks for the next picture, as they do when it's asleep. Returns, to sleep as usual, once
+// the server stops asking (stay awake turned off, or quiet hours), a check-in doesn't get through,
+// or there's a battery reading again (unplugged).
+void stayAwake(int mv) {
+  while (awakeSeconds && checkedIn && onUsb(mv)) {
+    Serial.printf("awake: next check-in in %u s\n", (unsigned)awakeSeconds);
+    int pressed = -1;
+    for (uint32_t start = millis(); millis() - start < awakeSeconds * 1000UL && pressed < 0; delay(20)) {
+      if (digitalRead(BTN_REFRESH) == LOW) pressed = BTN_REFRESH;
+      else if (digitalRead(BTN_NEXT) == LOW) pressed = BTN_NEXT;
+    }
+    if (pressed >= 0) {
+      while (digitalRead(pressed) == LOW) delay(20);  // once per press
+    }
+    wantNext = pressed == BTN_NEXT;
+    mv = readBatteryMv();
+    if (!onUsb(mv)) return;
+    awakeSeconds = 0;
+    checkedIn = false;
+    offer.version = "";
+    if (WiFi.status() == WL_CONNECTED || connectWifi()) fetchAndDraw(mv);  // Wi-Fi is off after a redraw
+    if (offer.version.length()) installUpdate(mv);
+    if (!checkedIn) sleepAfterFailedCheckIn();
+  }
 }
 
 void goToSleep() {
@@ -1464,6 +1504,7 @@ void setup() {
   if (!drew && wantSetup) showCodeScreen();  // what someone needs to send the first picture
   if (offer.version.length()) installUpdate(mv);  // restarts into the new firmware if it works
   if (!checkedIn) sleepAfterFailedCheckIn();
+  stayAwake(mv);  // plugged in with stay awake on: checks in every few minutes until that changes
   goToSleep();
 }
 

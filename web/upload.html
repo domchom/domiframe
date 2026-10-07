@@ -349,6 +349,8 @@
           </select>
         </label>
         <p class="muted small">The frame sleeps between wakes so its battery lasts, and can't be woken from here. It always wakes in time to change its picture. Check-ins pick up what you do in between (new photos, Show next, these settings). To see a change now, press KEY1 on the frame; KEY2 puts up the next picture.</p>
+        <label class="check"><input type="checkbox" id="awake"> Stay awake when plugged in</label>
+        <p class="muted small">On USB power, the frame stays awake and checks in every 5 minutes instead of sleeping, so new photos go up within 5 minutes (firmware 0.9.8 or later). On its battery it sleeps as usual.</p>
         <label class="check"><input type="checkbox" id="quiet"> Sleep overnight (saves battery)</label>
         <div class="row quiet-hours" id="quiet-hours">
           <label class="slider">From <select id="quietStart"></select></label>

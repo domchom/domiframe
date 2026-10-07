@@ -2,7 +2,7 @@
 
 // ---- Server ---------------------------------------------------------------
 #define SERVER_BASE "https://domiframe.art"
-#define FW_VERSION "0.9.7"  // tools/release.py publishes it; raise it for every release
+#define FW_VERSION "0.9.8"  // tools/release.py publishes it; raise it for every release
 
 // Which build this is, so updates over Wi-Fi only ever bring the same build (platformio.ini envs)
 #if defined(DOMIFRAME_PANEL_13IN3)
@@ -26,6 +26,10 @@
 #define SLEEP_MINUTES 60
 #define MIN_SLEEP_MINUTES 5
 #define MAX_SLEEP_MINUTES (7 * 24 * 60)
+// Plugged in with "stay awake" on, the server sends X-Awake-Seconds instead (netlify/lib/schedule.mjs
+// AWAKE_SECONDS): the frame stays up and checks in that often. Taken only in this range.
+#define MIN_AWAKE_SECONDS 15
+#define MAX_AWAKE_SECONDS 3600
 // After check-ins that don't get through (no Wi-Fi, or the server doesn't answer), the frame
 // waits twice as long after each one in a row, up to this, so a frame whose network is down
 // doesn't spend its battery on the radio every hour.

@@ -109,7 +109,7 @@ async function loadInfo() {
   $("st-seen").textContent = info.lastSeen ? ago(info.lastSeen) : "never";
   const late = isLate(info.lastSeen, info.nextCheckIn);
   $("st-next").textContent = !info.lastSeen ? "–" : late ? "late" : until(info.nextCheckIn) || "–";
-  $("st-battery").textContent = pct != null ? `${pct}%` : "–";
+  $("st-battery").textContent = info.pluggedIn ? "plugged in" : pct != null ? `${pct}%` : "–";
   $("st-gauge").style.setProperty("--pct", Math.ceil((pct ?? 0) / 10) * 10); // whole segments
   $("st-gauge").classList.toggle("low", low);
   $("frame-status").textContent = !info.lastSeen ? "The frame hasn't checked in yet."
@@ -641,13 +641,15 @@ function showSettings(s) {
   }
   $("rotateHours").value = s.rotateHours;
   $("checkMinutes").value = s.checkMinutes;
+  $("awake").checked = !!s.awake;
   $("quiet").checked = s.quiet;
   $("quietStart").value = s.quietStart;
   $("quietEnd").value = s.quietEnd;
   $("quiet-hours").hidden = !s.quiet;
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   $("tz-note").textContent = s.quiet && s.tz !== tz ? `Quiet hours use ${s.tz} time. Saving switches them to ${tz}.` : "";
-  $("foot").textContent = `The frame checks in ${checkLabel(s.checkMinutes)}. Press KEY1 on it to update now.`;
+  $("foot").textContent = frameInfo?.awake ? "The frame is plugged in and awake: it checks in every 5 minutes. Press KEY1 on it to update now."
+    : `The frame checks in ${checkLabel(s.checkMinutes)}. Press KEY1 on it to update now.`;
 }
 $("quiet").addEventListener("change", () => ($("quiet-hours").hidden = !$("quiet").checked));
 
@@ -655,6 +657,7 @@ $("save-settings").addEventListener("click", async () => {
   const body = {
     rotateHours: Number($("rotateHours").value),
     checkMinutes: Number($("checkMinutes").value),
+    awake: $("awake").checked,
     quiet: $("quiet").checked,
     quietStart: Number($("quietStart").value),
     quietEnd: Number($("quietEnd").value),

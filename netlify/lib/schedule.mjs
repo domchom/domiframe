@@ -17,6 +17,10 @@ export const CHECK_MINUTES = [15, 30, 60, 120, 240, 480];
 export const MAX_PICTURES = 200;
 export const MAX_ALBUMS = 50;
 export const LOW_BATTERY_MV = 3450;
+// A frame on USB power with "stay awake" on checks in this often instead of sleeping, so a new
+// picture goes up within 5 minutes of being sent (firmware/src/main.cpp stayAwake). Each check-in
+// is a function call: every minute would be ~43,000 a month per frame, this is ~8,600.
+export const AWAKE_SECONDS = 300;
 export const ALBUM_ID_RE = /^[a-z0-9]{6,20}$/;
 export const TRASH_DAYS = 30;
 export const MAX_TRASH = 100; // beyond this the oldest are deleted for good, to bound storage
@@ -32,6 +36,7 @@ export const DEFAULT_SETTINGS = {
   checkMinutes: 60,
   album: null,        // folder the frame cycles through; null = all pictures
   order: "inorder",   // "inorder" (oldest first) or "shuffle"
+  awake: false,       // on USB power: stay awake and check in every AWAKE_SECONDS (from firmware 0.9.8)
   quiet: false,       // no check-ins overnight, to save battery
   quietStart: 23,     // local hour, inclusive
   quietEnd: 7,        // local hour, exclusive
@@ -79,6 +84,10 @@ export function mergeSettings(current, update) {
   if ("order" in u) {
     if (!["inorder", "shuffle"].includes(u.order)) return { error: 'order must be "inorder" or "shuffle"' };
     s.order = u.order;
+  }
+  if ("awake" in u) {
+    if (typeof u.awake !== "boolean") return { error: "awake must be true or false" };
+    s.awake = u.awake;
   }
   if ("quiet" in u) s.quiet = Boolean(u.quiet);
   for (const k of ["quietStart", "quietEnd"]) {
@@ -240,6 +249,15 @@ const lowBatteryMinutes = (batteryMv) => (batteryMv && batteryMv < LOW_BATTERY_M
 export function retryMinutes(settings, batteryMv) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
   return Math.max(s.checkMinutes, lowBatteryMinutes(batteryMv));
+}
+
+/**
+ * Seconds until a plugged-in frame with "stay awake" on checks in again, without sleeping; 0 to
+ * sleep as usual (nextWakeMinutes). Quiet hours still hold: the frame sleeps through them.
+ */
+export function awakeSeconds(settings, pluggedIn, now) {
+  const s = { ...DEFAULT_SETTINGS, ...settings };
+  return s.awake && pluggedIn && !inQuietHours(now, s) ? AWAKE_SECONDS : 0;
 }
 
 /** Minutes the frame should sleep after a check-in at `now`. */

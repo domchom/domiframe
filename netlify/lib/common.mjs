@@ -203,6 +203,8 @@ export async function frameSummary(id, frame) {
     batteryMv: st.batteryMv ?? null,
     fw: st.fw || null,
     nextCheckIn,
+    pluggedIn: !!st.pluggedIn, // on USB power at its last check-in
+    awake: !!st.awake,         // ...and staying awake, checking in every 5 minutes (settings.awake)
     settings: { ...DEFAULT_SETTINGS, ...frame.settings },
     current: state.current,
     since: state.since,

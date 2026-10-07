@@ -4,6 +4,7 @@ import {
   choosePicture, nextWakeMinutes, retryMinutes, addPicture, removePicture, mergeSettings, inQuietHours,
   emptyState, MAX_PICTURES, replacePicture, movePictures, deleteAlbum, addAlbum,
   removePictures, restorePictures, emptyTrash, setPictureDay, isPictureDay, pool, TRASH_DAYS, MAX_TRASH,
+  awakeSeconds, AWAKE_SECONDS,
 } from "../netlify/lib/schedule.mjs";
 
 const H = 3600e3;
@@ -216,6 +217,18 @@ test("settings validate orientation", () => {
   assert.equal(mergeSettings({}, {}).settings.flip, false);
   assert.equal(mergeSettings({}, { flip: true }).settings.flip, true);
   assert.ok(mergeSettings({}, { flip: 1 }).error);
+});
+
+test("stay awake: only plugged in, and not in quiet hours", () => {
+  assert.equal(mergeSettings({}, {}).settings.awake, false);
+  assert.equal(mergeSettings({}, { awake: true }).settings.awake, true);
+  assert.ok(mergeSettings({}, { awake: "yes" }).error);
+  assert.equal(awakeSeconds({ awake: true }, true, T0), AWAKE_SECONDS);
+  assert.equal(awakeSeconds({ awake: true }, false, T0), 0, "on its battery it sleeps");
+  assert.equal(awakeSeconds({ awake: false }, true, T0), 0);
+  const quiet = { awake: true, quiet: true, quietStart: 11, quietEnd: 13, tz: "UTC" }; // T0 is 12:00 UTC
+  assert.equal(awakeSeconds(quiet, true, T0), 0, "it sleeps through quiet hours");
+  assert.equal(awakeSeconds(quiet, true, T0 + 2 * H), AWAKE_SECONDS);
 });
 
 test("settings validate folder and order", () => {

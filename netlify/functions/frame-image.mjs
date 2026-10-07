@@ -3,6 +3,7 @@
 //                      X-Set-Orientation (landscape|portrait, when set on the frame),
 //                      X-Panel (7.3|13.3: the screen the firmware was built for),
 //                      X-Fw-Env (ee04|ee02-13in3: which firmware build it runs),
+//                      X-Power: usb (running on USB power, from firmware 0.9.8),
 //                      X-Next: 1 (someone pressed the frame's "next" button: the next picture now),
 //                      X-Status: 1 (the frame's status screen: check in without changing the picture)
 //        -> 200 sealed packed image | 304 unchanged | 204 nothing uploaded yet (or X-Status)
@@ -10,6 +11,8 @@
 //        interval, for when a check-in fails), X-Orientation, X-Flip (1: hung upside down, so
 //        the frame turns what it draws 180°) and X-Local-Time (now, where the frame hangs, for
 //        its status screen); an X-Status reply also X-Frame-Name and X-Pictures;
+//        X-Awake-Seconds when the frame is on USB power with "stay awake" on: check in again
+//        after that long, without sleeping (X-Sleep-Minutes is for when it's unplugged);
 //        and
 //        when newer firmware is out: X-Fw-Update (version), X-Fw-Url, X-Fw-Size and X-Fw-Sig
 //        (see lib/firmware.mjs).
@@ -31,6 +34,7 @@ import {
 import { firmwareHeaders } from "../lib/firmware.mjs";
 import {
   choosePicture, nextWakeMinutes, retryMinutes, addPicture, mergeSettings, fitsPanel, pool, localTimeLabel,
+  awakeSeconds,
 } from "../lib/schedule.mjs";
 
 export const config = { path: "/api/frames/:id/image" };
@@ -65,8 +69,10 @@ async function deviceFetch(req, id, frame) {
     }
   }
 
+  // On USB power the battery reading means nothing (there's no battery, or it's charging)
+  const pluggedIn = req.headers.get("x-power") === "usb";
   const parsedMv = parseInt(req.headers.get("x-battery-mv") || "", 10);
-  const mv = Number.isFinite(parsedMv) && parsedMv > 0 ? parsedMv : null;
+  const mv = !pluggedIn && Number.isFinite(parsedMv) && parsedMv > 0 ? parsedMv : null;
 
   // The status screen only looks: the picture and the rotation stay as they are
   const statusOnly = req.headers.get("x-status") === "1";
@@ -80,11 +86,14 @@ async function deviceFetch(req, id, frame) {
   state = saved || state || (await loadState(id));
 
   const sleepMinutes = nextWakeMinutes(state, frame.settings, t, mv);
+  const awake = awakeSeconds(frame.settings, pluggedIn, t);
   const statusWrite = status().setJSON(id, {
     lastSeen: new Date(t).toISOString(),
     batteryMv: mv,
     fw: (req.headers.get("x-fw") || "").slice(0, 20) || null,
-    sleepMinutes,
+    sleepMinutes: awake ? Math.ceil(awake / 60) : sleepMinutes, // when it checks in next
+    pluggedIn,
+    awake: awake > 0,
   });
   // How the frame hangs and its screen size, for the virtual frame (the real one just draws the
   // bytes, and knows its own screen): it takes the size chosen when the frame was created
@@ -95,6 +104,7 @@ async function deviceFetch(req, id, frame) {
     "x-flip": frame.settings?.flip ? "1" : "0",
     "x-panel": frame.settings?.panel || "7.3",
     "x-local-time": localTimeLabel(t, frame.settings?.tz),
+    ...(awake ? { "x-awake-seconds": String(awake) } : {}),
     ...firmwareHeaders(req.headers.get("x-fw-env"), req.headers.get("x-fw")),
   };
 

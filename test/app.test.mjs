@@ -450,6 +450,34 @@ test("upside down: the frame draws the same picture again, turned", async () => 
   assert.equal(back.headers.get("etag"), etag);
 });
 
+test("stay awake: a plugged-in frame checks in every 5 minutes", async () => {
+  const f = await newFrame("plugged");
+  await f.upload(1);
+  const usb = { "x-power": "usb", "x-battery-mv": "120" };
+  const asleep = await f.dev(usb);
+  assert.equal(asleep.headers.get("x-awake-seconds"), null, "off until it's turned on");
+  assert.ok(Number(asleep.headers.get("x-sleep-minutes")) >= 5);
+
+  assert.equal((await f.call("settings", jsonBody("PUT", { awake: "yes" }))).status, 400);
+  assert.equal((await f.call("settings", jsonBody("PUT", { awake: true }))).status, 200);
+  const awake = await f.dev({ ...usb, "if-none-match": asleep.headers.get("etag") });
+  assert.equal(awake.status, 304);
+  assert.equal(awake.headers.get("x-awake-seconds"), "300");
+  assert.ok(Number(awake.headers.get("x-sleep-minutes")) >= 5, "for when it's unplugged");
+  let info = await f.info();
+  assert.equal(info.pluggedIn, true);
+  assert.equal(info.awake, true);
+  assert.equal(info.batteryMv, null, "no battery reading on USB power");
+  assert.ok(Date.parse(info.nextCheckIn) - Date.parse(info.lastSeen) <= 5 * 60e3, "next check-in in 5 minutes");
+
+  const battery = await f.dev();
+  assert.equal(battery.headers.get("x-awake-seconds"), null, "on its battery it sleeps");
+  info = await f.info();
+  assert.equal(info.pluggedIn, false);
+  assert.equal(info.awake, false);
+  assert.equal(info.batteryMv, 3900);
+});
+
 test("a frame the admin just made has no code yet: nothing opens it", async () => {
   const created = await adminReq("/api/admin/frames", { method: "POST", body: JSON.stringify({ id: "fresh" }) });
   assert.equal(created.status, 201);
