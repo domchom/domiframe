@@ -326,7 +326,7 @@
     <section class="card" id="settings-card" hidden>
       <details>
         <summary><h2 class="section-title">Frame settings</h2><span class="meta">schedule, battery, quiet hours</span></summary>
-        <label class="slider">Change the picture
+        <label class="slider">Picture changes
           <select id="rotateHours">
             <option value="0">Only when a new one arrives</option>
             <option value="1">Every hour</option>
@@ -338,7 +338,7 @@
             <option value="168">Every week</option>
           </select>
         </label>
-        <label class="slider">Check for new pictures
+        <label class="slider">Checks in
           <select id="checkMinutes">
             <option value="15">Every 15 minutes (shorter battery life)</option>
             <option value="30">Every 30 minutes</option>
@@ -348,6 +348,7 @@
             <option value="480">Every 8 hours (longest battery life)</option>
           </select>
         </label>
+        <p class="muted small">The frame sleeps between wakes so its battery lasts, and can't be woken from here. It always wakes in time to change its picture. Check-ins pick up what you do in between (new photos, Show next, these settings). To see a change now, press KEY1 on the frame; KEY2 puts up the next picture.</p>
         <label class="check"><input type="checkbox" id="quiet"> Sleep overnight (saves battery)</label>
         <div class="row quiet-hours" id="quiet-hours">
           <label class="slider">From <select id="quietStart"></select></label>
@@ -366,7 +367,7 @@
       </details>
     </section>
 
-    <p class="muted small foot" id="foot">The frame checks for new pictures about once an hour. Press its button to update now.</p>
+    <p class="muted small foot" id="foot">The frame checks in about once an hour. Press KEY1 on it to update now.</p>
     <p class="muted small foot legal-links"><a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a> · <a href="/support.html">Support</a> · <a href="/app">iPhone app</a></p>
   </main>
   <script src="/vendor/qrcode.min.js"></script>

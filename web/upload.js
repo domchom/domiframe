@@ -114,7 +114,7 @@ async function loadInfo() {
   $("st-gauge").classList.toggle("low", low);
   $("frame-status").textContent = !info.lastSeen ? "The frame hasn't checked in yet."
     : late && low ? `Late: last checked in ${ago(info.lastSeen)}, with its battery low. Time to charge it.`
-    : late ? `Late: last checked in ${ago(info.lastSeen)}. Check the Wi-Fi where it hangs, or press its button.`
+    : late ? `Late: last checked in ${ago(info.lastSeen)}. Check the Wi-Fi where it hangs, or press KEY1 on it.`
     : low ? "Battery low: time to charge it." : "";
   $("frame-status").classList.toggle("warn", late || low);
 
@@ -300,6 +300,13 @@ $("hang-rebuild").addEventListener("click", () => {
 
 const lib = { view: "all", selected: new Set() }; // view: "all" | "unfiled" | "trash" | folder id
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+// When something done now reaches the frame: "at its next check-in, in 40 min" (as Format.atCheckIn
+// in the app). Nothing can wake the frame from here: it sleeps until then, or until KEY1.
+const atCheckIn = () => {
+  const when = frameInfo && !isLate(frameInfo.lastSeen, frameInfo.nextCheckIn) && until(frameInfo.nextCheckIn);
+  return when ? `at the frame's next check-in, ${when}` : "at the frame's next check-in";
+};
+const PRESS_KEY1 = "Press KEY1 on the frame to see it now.";
 const folderName = (id) => frameInfo?.albums.find((a) => a.id === id)?.name;
 const jsonReq = (method, body) => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
@@ -513,7 +520,7 @@ $("sel-none").addEventListener("click", () => { lib.selected.clear(); showQueue(
 $("sel-show").addEventListener("click", () => {
   const [id] = lib.selected;
   lib.selected.clear();
-  act(api(`pictures/${id}/show`, { method: "POST" }), "The frame will show it at its next check-in. Press its button to update now.");
+  act(api(`pictures/${id}/show`, { method: "POST" }), `Up next, ${atCheckIn()}. ${PRESS_KEY1}`);
 });
 // Removing moves pictures to "Recently removed" for TRASH_DAYS, with an Undo right away.
 async function removeWithUndo(body) {
@@ -640,7 +647,7 @@ function showSettings(s) {
   $("quiet-hours").hidden = !s.quiet;
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   $("tz-note").textContent = s.quiet && s.tz !== tz ? `Quiet hours use ${s.tz} time. Saving switches them to ${tz}.` : "";
-  $("foot").textContent = `The frame checks for new pictures ${checkLabel(s.checkMinutes)}. Press its button to update now.`;
+  $("foot").textContent = `The frame checks in ${checkLabel(s.checkMinutes)}. Press KEY1 on it to update now.`;
 }
 $("quiet").addEventListener("change", () => ($("quiet-hours").hidden = !$("quiet").checked));
 
@@ -1904,9 +1911,9 @@ $("send").addEventListener("click", async () => {
         try { await sendUpload(await prepareFor(t, queue)); } catch { failedIds.add(t.id); }
       }
       msg((editing
-        ? "Saved. If it's on the frame, it redraws at the next check-in. Press the button on the frame to update it now."
+        ? `Saved. If it's on the frame, it redraws ${atCheckIn()}. ${PRESS_KEY1}`
         : queue === "next"
-          ? "Sent! The frame will show it at its next check-in; press the button on the frame to show it now. To change it later, select it above and press Edit."
+          ? `Sent! It goes up ${atCheckIn()}. ${PRESS_KEY1} To change it later, select it above and press Edit.`
           : "Sent! It joins the frame's rotation. To change it later, select it above and press Edit.")
         + alsoNote(targets, failedIds), failedIds.size ? "err" : "ok");
       clearEditor();
@@ -1968,7 +1975,7 @@ async function sendBatch() {
   }
   const verb = editing ? "Saved" : "Sent";
   msg(`${verb} ${plural(sent, editing ? "picture" : "photo")}` + (failed ? `; ${failed} couldn't be opened or sent.` : ".") +
-    (sent ? (editing || upNext() ? " They reach the frame at its next check-in; press the button on the frame to update it now." : " They join the frame's rotation.") : "") +
+    (sent ? (editing || upNext() ? ` They reach the frame ${atCheckIn()}. ${PRESS_KEY1}` : " They join the frame's rotation.") : "") +
     alsoNote(targets, failedIds), failed || failedIds.size ? "err" : "ok");
   if (!failed) clearEditor();
 }
