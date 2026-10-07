@@ -2,15 +2,15 @@
 // web/firmware/. Don't edit by hand.
 export default {
   "ee04": {
-    "version": "0.9.7",
-    "file": "ee04-0.9.7.bin",
-    "size": 1080944,
-    "sig": "MEYCIQDbJsYZL0TN0vJ/GkJfmy8REGz+1LFNmTQGCoQW4yHPyAIhALQx2rYKmiELdn5zTTqeHTcQVCBVW2K2aLuwd1+hf2Su"
+    "version": "0.9.8",
+    "file": "ee04-0.9.8.bin",
+    "size": 1081472,
+    "sig": "MEQCIBxmCoVWNDxwlDCowCIMvEzkzp/N/xIlMOxRI4H08q8aAiBVS538+Tl+6pCcMEZSfebJPCTnT1XK8rlgrZka3UCwiQ=="
   },
   "ee02-13in3": {
-    "version": "0.9.7",
-    "file": "ee02-13in3-0.9.7.bin",
-    "size": 1160832,
-    "sig": "MEUCIQD8kr49j8+SRDsCKJuINcggFx3Wh9vBbUK5e/8N7GeMdwIge86+xpgzwM7h0dG6E9h//lOTqKUn+9RTcHlG7FXLCaY="
+    "version": "0.9.8",
+    "file": "ee02-13in3-0.9.8.bin",
+    "size": 1161392,
+    "sig": "MEQCIFF7fUBGxGX/Yvz/ytdIwCtB3Wrg9k0rPaPjwmxM2sMaAiBpsHas0JW2Xw8INiI7vgpibi4XUp2tPb477AjMIM/S2w=="
   }
 };
