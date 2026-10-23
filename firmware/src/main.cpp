@@ -24,8 +24,10 @@
 // doesn't sleep. It keeps Wi-Fi up and checks in every 5 minutes (X-Awake-Seconds), so new photos
 // go up within 5 minutes of being sent. Unplugged, or in quiet hours, it sleeps as usual.
 //
-// KEY2: press it and the frame wakes and puts up the next picture (X-Next). Hold it while
-// pressing reset for the status screen: Wi-Fi, server, battery and the last check-in.
+// KEY1: press it and the frame wakes and puts up the next picture (X-Next). KEY2: the picture
+// before (X-Prev). When the screen shows something else (the status screen, say), either one
+// just brings the picture back. Hold KEY2 while pressing reset for the status screen: Wi-Fi,
+// server, battery and the last check-in.
 //
 // Updates over Wi-Fi: when newer firmware for this build is out, the check-in reply says so.
 // The frame downloads it, checks its signature against FW_SIGNING_KEY (include/fw_key.h) and
@@ -108,7 +110,8 @@ bool codePending = false;  // made but not yet registered with the server
 // How long to sleep: the server's X-Sleep-Minutes after a check-in, otherwise the usual interval
 uint32_t sleepMinutes = SLEEP_MINUTES;
 bool checkedIn = false;  // the server answered this wake's check-in
-bool wantNext = false;   // woken by KEY2: ask for the next picture
+bool wantNext = false;   // woken by KEY1: ask for the next picture
+bool wantBack = false;   // woken by KEY2: ask for the picture before
 // Plugged in with "stay awake" on: check in again after this long instead of sleeping
 // (X-Awake-Seconds, from this wake's check-in; 0 = sleep as usual)
 uint32_t awakeSeconds = 0;
@@ -1128,7 +1131,10 @@ bool fetchAndDraw(int batteryMv) {
   http.useHTTP10(true);
   http.setTimeout(20000);
   addFrameHeaders(http, batteryMv);
+  // The server only moves on from the picture in If-None-Match: with anything else on the screen
+  // (the status screen, say), the button brings the picture back
   if (wantNext) http.addHeader("X-Next", "1");
+  if (wantBack) http.addHeader("X-Prev", "1");
   if (etag.length()) http.addHeader("If-None-Match", etag);
   if (orientationPending) http.addHeader("X-Set-Orientation", orientation);
   const char* keep[] = {"ETag", "X-Sleep-Minutes", "X-Retry-Minutes", "X-Orientation", "X-Flip",
@@ -1386,8 +1392,8 @@ bool someoneThere() {
 }
 
 // Plugged in with "stay awake" on: instead of sleeping, keep Wi-Fi up and check in again every
-// awakeSeconds, so a picture sent from a phone goes up within a few minutes. KEY1 checks in at once,
-// KEY2 asks for the next picture, as they do when it's asleep. Returns, to sleep as usual, once
+// awakeSeconds, so a picture sent from a phone goes up within a few minutes. KEY1 asks for the next
+// picture at once, KEY2 for the one before, as they do when it's asleep. Returns, to sleep as usual, once
 // the server stops asking (stay awake turned off, or quiet hours), a check-in doesn't get through,
 // or there's a battery reading again (unplugged).
 void stayAwake(int mv) {
@@ -1395,13 +1401,14 @@ void stayAwake(int mv) {
     Serial.printf("awake: next check-in in %u s\n", (unsigned)awakeSeconds);
     int pressed = -1;
     for (uint32_t start = millis(); millis() - start < awakeSeconds * 1000UL && pressed < 0; delay(20)) {
-      if (digitalRead(BTN_REFRESH) == LOW) pressed = BTN_REFRESH;
-      else if (digitalRead(BTN_NEXT) == LOW) pressed = BTN_NEXT;
+      if (digitalRead(BTN_NEXT) == LOW) pressed = BTN_NEXT;
+      else if (digitalRead(BTN_BACK) == LOW) pressed = BTN_BACK;
     }
     if (pressed >= 0) {
       while (digitalRead(pressed) == LOW) delay(20);  // once per press
     }
     wantNext = pressed == BTN_NEXT;
+    wantBack = pressed == BTN_BACK;
     mv = readBatteryMv();
     if (!onUsb(mv)) return;
     awakeSeconds = 0;
@@ -1419,12 +1426,12 @@ void goToSleep() {
   digitalWrite(EPD_ENABLE, LOW);
 
   esp_sleep_enable_timer_wakeup((uint64_t)sleepMinutes * 60ULL * 1000000ULL);
-  for (int pin : {BTN_REFRESH, BTN_NEXT}) {
+  for (int pin : {BTN_NEXT, BTN_BACK}) {
     rtc_gpio_pullup_en((gpio_num_t)pin);
     rtc_gpio_pulldown_dis((gpio_num_t)pin);
   }
   // Either button wakes it (ESP32-S3: ANY_LOW works on any IDF version)
-  esp_sleep_enable_ext1_wakeup((1ULL << BTN_REFRESH) | (1ULL << BTN_NEXT), ESP_EXT1_WAKEUP_ANY_LOW);
+  esp_sleep_enable_ext1_wakeup((1ULL << BTN_NEXT) | (1ULL << BTN_BACK), ESP_EXT1_WAKEUP_ANY_LOW);
 
   Serial.printf("sleeping %u min\n", (unsigned)sleepMinutes);
   Serial.flush();
@@ -1441,8 +1448,8 @@ void setup() {
   Serial.begin(115200);
   delay(200);
   pinMode(BTN_SETUP, INPUT_PULLUP);
-  pinMode(BTN_REFRESH, INPUT_PULLUP);
   pinMode(BTN_NEXT, INPUT_PULLUP);
+  pinMode(BTN_BACK, INPUT_PULLUP);
 
   loadSettings();
   sleepMinutes = usualMinutes();  // until the server says otherwise
@@ -1455,12 +1462,14 @@ void setup() {
 
   bool wantSetup = frameId.isEmpty() || deviceKey.isEmpty() || digitalRead(BTN_SETUP) == LOW;
   // KEY1 held while pressing reset (not a KEY1 wake from sleep): show the frame code again.
-  // KEY2 the same way: the status screen. KEY2 pressed while asleep: the next picture.
+  // KEY2 the same way: the status screen. Pressed while asleep: KEY1 the next picture, KEY2 the
+  // one before.
   bool pressedReset = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED;
-  bool wantCode = pressedReset && digitalRead(BTN_REFRESH) == LOW;
-  bool wantStatus = pressedReset && digitalRead(BTN_NEXT) == LOW;
-  wantNext = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 &&
-             (esp_sleep_get_ext1_wakeup_status() & (1ULL << BTN_NEXT));
+  bool wantCode = pressedReset && digitalRead(BTN_NEXT) == LOW;
+  bool wantStatus = pressedReset && digitalRead(BTN_BACK) == LOW;
+  bool keyWake = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1;
+  wantNext = keyWake && (esp_sleep_get_ext1_wakeup_status() & (1ULL << BTN_NEXT));
+  wantBack = keyWake && !wantNext && (esp_sleep_get_ext1_wakeup_status() & (1ULL << BTN_BACK));
   // A code the server already knows is kept here, so show it without Wi-Fi: someone whose
   // network changed can still read it before redoing setup
   if (wantCode && !wantSetup && !frameCode.isEmpty() && !codePending) {

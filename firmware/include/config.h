@@ -2,7 +2,7 @@
 
 // ---- Server ---------------------------------------------------------------
 #define SERVER_BASE "https://domiframe.art"
-#define FW_VERSION "0.9.8"  // tools/release.py publishes it; raise it for every release
+#define FW_VERSION "0.9.9"  // tools/release.py publishes it; raise it for every release
 
 // Which build this is, so updates over Wi-Fi only ever bring the same build (platformio.ini envs)
 #if defined(DOMIFRAME_PANEL_13IN3)
@@ -53,9 +53,9 @@
 // SPI: SCK = D8, MOSI = D10 (XIAO default SPI pins)
 
 // Buttons (from Seeed EE04 wiki; active LOW)
-#define BTN_REFRESH 2  // KEY1: wake and check for a new picture now
+#define BTN_NEXT 2     // KEY1: wake and put up the next picture; hold while pressing reset for the code
 #define BTN_SETUP 5    // KEY3: hold while powering on / pressing reset to reopen Wi-Fi setup
-#define BTN_NEXT 3     // KEY2: wake and put up the next picture; hold while pressing reset for status
+#define BTN_BACK 3     // KEY2: wake and go back to the picture before; hold while pressing reset for status
 
 // Battery sense (from Seeed EE04 wiki)
 #define BAT_ADC_PIN 1        // A0

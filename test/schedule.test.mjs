@@ -52,6 +52,35 @@ test("the frame's next button: the next picture now, which then stays a whole tu
   assert.equal(choosePicture({ ...withPics("a"), current: "a", seen: ["a"] }, s, T0, Math.random, next).state.current, "a");
 });
 
+test("the frame's back button: the picture before, which then stays a whole turn", () => {
+  const next = { advance: true }, back = { back: true };
+  const s = { rotateHours: 24 };
+  let state = { ...withPics("a", "b", "c"), current: "a", since: new Date(T0).toISOString(), seen: ["a", "b", "c"] };
+  assert.equal(choosePicture(state, s, T0, Math.random, back).changed, false, "nothing to go back to");
+  state = choosePicture(state, s, T0 + H, Math.random, next).state; // b
+  state = choosePicture(state, s, T0 + 2 * H, Math.random, next).state; // c
+  assert.deepEqual(state.history, ["a", "b"]);
+  let r = choosePicture(state, s, T0 + 3 * H, Math.random, back);
+  assert.equal(r.state.current, "b");
+  assert.equal(choosePicture(r.state, s, T0 + 4 * H).changed, false, "stays until its turn is up");
+  r = choosePicture(r.state, s, T0 + 4 * H, Math.random, back);
+  assert.equal(r.state.current, "a", "and back again");
+  assert.equal(choosePicture(r.state, s, T0 + 5 * H, Math.random, next).state.current, "b", "next goes on from there");
+  // deleted pictures are skipped, and an edited one is found under its new id
+  state = choosePicture(state, s, T0 + 3 * H, Math.random, next).state; // a, history a b c
+  state = removePicture(state, "c");
+  assert.equal(choosePicture(state, s, T0 + 4 * H, Math.random, back).state.current, "b");
+  state = replacePicture(state, "b", pic("b2"));
+  assert.equal(choosePicture(state, s, T0 + 4 * H, Math.random, back).state.current, "b2");
+  // "show next" waits for the check-in after
+  r = choosePicture({ ...state, showNext: "a" }, s, T0 + 4 * H, Math.random, back);
+  assert.equal(r.state.current, "b2");
+  assert.equal(choosePicture(r.state, s, T0 + 4 * H).state.current, "a");
+  // only so far back
+  for (let i = 0; i < 30; i++) state = choosePicture(state, s, T0 + (5 + i) * H, Math.random, next).state;
+  assert.equal(state.history.length, 20);
+});
+
 test("rotateHours 0 keeps the picture until a new one arrives", () => {
   const state = { ...withPics("a", "b"), current: "a", since: new Date(T0).toISOString(), seen: ["a", "b"] };
   assert.equal(choosePicture(state, { rotateHours: 0 }, T0 + 1000 * H).changed, false);

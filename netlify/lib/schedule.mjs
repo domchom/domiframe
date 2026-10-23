@@ -11,6 +11,7 @@
 //   showNext   id to put up at the next check-in, ahead of the schedule
 //   onDemand   true while `current` was put up with showNext
 //   bag        ids still to come in this round of shuffle
+//   history    ids that were on the frame before `current`, most recent last, for the back button
 
 export const ROTATE_HOURS = [0, 1, 3, 6, 12, 24, 72, 168]; // 0 = only when a new picture arrives
 export const CHECK_MINUTES = [15, 30, 60, 120, 240, 480];
@@ -24,6 +25,7 @@ export const AWAKE_SECONDS = 300;
 export const ALBUM_ID_RE = /^[a-z0-9]{6,20}$/;
 export const TRASH_DAYS = 30;
 export const MAX_TRASH = 100; // beyond this the oldest are deleted for good, to bound storage
+export const MAX_HISTORY = 20; // how far back the frame's back button goes
 export const DAY_RE = /^(\d{4}-)?(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 export const PANEL_IDS = ["7.3", "13.3"]; // see PANELS in web/dither.js
@@ -44,7 +46,7 @@ export const DEFAULT_SETTINGS = {
 };
 
 export const emptyState = () => ({
-  pictures: [], albums: [], current: null, since: null, seen: [], showNext: null, onDemand: false, bag: [], trash: [],
+  pictures: [], albums: [], current: null, since: null, seen: [], showNext: null, onDemand: false, bag: [], trash: [], history: [],
   // The frame has had pictures (or the default ones are going up): no default pictures for it
   // again. Part of the state, so a new frame code starts without it.
   defaultsDone: false,
@@ -163,21 +165,38 @@ export function pool(state, settings) {
  *   2. pictures set for today (in the frame's time zone), taking turns if there are several
  *   3. new pictures in the cycling folder, oldest first, so a burst of uploads each get a turn
  *   4. the next picture in the folder when the rotation is due (in order or shuffled)
- * advance: someone pressed the frame's "next" button (button 2), so the rotation is due now,
+ * advance: someone pressed the frame's "next" button (KEY1), so the rotation is due now,
  * whatever the schedule; the picture it brings stays up for a whole turn, like a "show next" one.
+ * back: someone pressed the frame's "back" button (KEY2): the picture that was up before this
+ * one, which then stays a whole turn too. Ahead of everything else, "show next" included (that
+ * stays for the check-in after). Nothing to go back to: the picture stays.
  * Returns { state, changed }.
  */
-export function choosePicture(inState, settings, now, rng = Math.random, { advance = false } = {}) {
+export function choosePicture(inState, settings, now, rng = Math.random, { advance = false, back = false } = {}) {
   const s = { ...DEFAULT_SETTINGS, ...settings };
   let state = normalizeState(inState);
   let changed = false;
-  const show = (id, onDemand = advance) => ({
+  const show = (id, onDemand = advance, history = [...state.history, state.current].filter(Boolean).slice(-MAX_HISTORY)) => ({
     state: {
-      ...state, current: id, since: new Date(now).toISOString(), onDemand,
+      ...state, current: id, since: new Date(now).toISOString(), onDemand, history,
       seen: [...new Set([...state.seen, id])], bag: state.bag.filter((b) => b !== id),
     },
     changed: true,
   });
+
+  if (back) {
+    // Skip pictures deleted since, made for another screen size, or set for another day
+    const today = localDate(now, s.tz);
+    const history = [...state.history];
+    while (history.length) {
+      const id = history.pop();
+      const p = state.pictures.find((q) => q.id === id);
+      if (p && id !== state.current && fitsPanel(p, s) && (!p.day || isPictureDay(p.day, today))) {
+        return show(id, true, history);
+      }
+    }
+    return { state, changed };
+  }
 
   if (state.showNext) {
     const wanted = state.pictures.find((p) => p.id === state.showNext);
@@ -371,6 +390,7 @@ export function replacePicture(inState, oldId, pic) {
     current: swap(state.current), // the frame sees a new ETag and redraws
     seen: state.seen.map(swap),
     bag: state.bag.map(swap),
+    history: state.history.map(swap),
     showNext: state.showNext && swap(state.showNext),
   };
 }

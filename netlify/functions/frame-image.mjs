@@ -4,7 +4,8 @@
 //                      X-Panel (7.3|13.3: the screen the firmware was built for),
 //                      X-Fw-Env (ee04|ee02-13in3: which firmware build it runs),
 //                      X-Power: usb (running on USB power, from firmware 0.9.8),
-//                      X-Next: 1 (someone pressed the frame's "next" button: the next picture now),
+//                      X-Next: 1 (someone pressed the frame's "next" button, KEY1: the next picture now),
+//                      X-Prev: 1 (its "back" button, KEY2: the picture before this one, from firmware 0.9.9),
 //                      X-Status: 1 (the frame's status screen: check in without changing the picture)
 //        -> 200 sealed packed image | 304 unchanged | 204 nothing uploaded yet (or X-Status)
 //        Every reply carries X-Sleep-Minutes (when to check in next), X-Retry-Minutes (the usual
@@ -34,7 +35,7 @@ import {
 import { firmwareHeaders } from "../lib/firmware.mjs";
 import {
   choosePicture, nextWakeMinutes, retryMinutes, addPicture, mergeSettings, fitsPanel, pool, localTimeLabel,
-  awakeSeconds,
+  awakeSeconds, normalizeState,
 } from "../lib/schedule.mjs";
 
 export const config = { path: "/api/frames/:id/image" };
@@ -76,10 +77,17 @@ async function deviceFetch(req, id, frame) {
 
   // The status screen only looks: the picture and the rotation stay as they are
   const statusOnly = req.headers.get("x-status") === "1";
-  const advance = req.headers.get("x-next") === "1";
+  // Next and back move on from the picture on the frame. When it shows something else (an older
+  // version of an edited picture, say), the button brings it up to date first.
+  const ifNoneMatch = req.headers.get("if-none-match");
   let state = null;
   const saved = statusOnly ? null : await updateState(id, (before) => {
-    const out = choosePicture(before, frame.settings, t, Math.random, { advance });
+    const s = normalizeState(before);
+    const up = s.pictures.find((p) => p.id === s.current && fitsPanel(p, frame.settings));
+    const onScreen = Boolean(up) && ifNoneMatch === etagOf(up, frame);
+    const advance = onScreen && req.headers.get("x-next") === "1";
+    const back = onScreen && req.headers.get("x-prev") === "1";
+    const out = choosePicture(before, frame.settings, t, Math.random, { advance, back });
     state = out.state;
     return out.changed ? out.state : null;
   });
@@ -125,8 +133,8 @@ async function deviceFetch(req, id, frame) {
   }
 
   // Turned upside down since the frame last drew it: a new ETag, so it draws it again
-  const etag = `"${pic.etag}${frame.settings?.flip ? "-flip" : ""}"`;
-  if (req.headers.get("if-none-match") === etag) {
+  const etag = etagOf(pic, frame);
+  if (ifNoneMatch === etag) {
     await statusWrite;
     return new Response(null, { status: 304, headers: { etag, ...sleep } });
   }
@@ -144,6 +152,8 @@ async function deviceFetch(req, id, frame) {
     },
   });
 }
+
+const etagOf = (pic, frame) => `"${pic.etag}${frame.settings?.flip ? "-flip" : ""}"`;
 
 async function upload(req, id, frame) {
   if (!canManage(req, frame)) return json({ error: "unauthorized" }, 401);

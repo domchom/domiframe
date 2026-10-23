@@ -424,8 +424,9 @@ async function showClock() {
     ? `Server clock: ${serverTime.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })} (+${(c.offsetMinutes / 60).toFixed(1)} h)`
     : "Server clock: real time";
 }
-// next: KEY2, the next picture now (X-Next)
-async function wake(reason, { next = false } = {}) {
+// next: KEY1, the next picture now (X-Next); back: KEY2, the one before (X-Prev). With no picture
+// on the screen (no ETag), the server just sends the one that's up.
+async function wake(reason, { next = false, back = false } = {}) {
   if (busy) return;
   busy = true; $("key1").disabled = true; $("led").classList.add("on");
   const id = $("id").value.trim(), key = $("key").value.trim();
@@ -445,6 +446,7 @@ async function wake(reason, { next = false } = {}) {
     const headers = { "X-Device-Key": key, "X-Battery-Mv": $("mv").value, "X-Fw": FW };
     if (etag) headers["If-None-Match"] = etag;
     if (next) headers["X-Next"] = "1";
+    if (back) headers["X-Prev"] = "1";
     if (hangPending) headers["X-Set-Orientation"] = hangPending; // like the real frame's Wi-Fi setup
     if (screenPending) headers["X-Panel"] = screenPending;
     const res = await fetch(`/api/frames/${encodeURIComponent(id)}/image`, { headers, cache: "no-store" });
@@ -506,8 +508,8 @@ async function wake(reason, { next = false } = {}) {
   }
 }
 
-$("key1").addEventListener("click", () => wake("KEY1"));
-$("key2").addEventListener("click", () => wake("KEY2", { next: true }));
+$("key1").addEventListener("click", () => wake("KEY1", { next: true }));
+$("key2").addEventListener("click", () => wake("KEY2", { back: true }));
 // Like holding KEY2 while pressing reset: a check-in that leaves the picture as it is
 $("status-check").addEventListener("click", async () => {
   const id = $("id").value.trim(), key = $("key").value.trim();

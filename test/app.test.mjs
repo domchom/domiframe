@@ -406,7 +406,7 @@ test("firmware updates: offered to frames on an older version of the same build"
   assert.ok(!newerVersion("1.0", "0.6.0"));
 });
 
-test("the frame's buttons: next picture, and a status check that changes nothing", async () => {
+test("the frame's buttons: next picture, the one before, and a status check that changes nothing", async () => {
   const f = await newFrame("buttons");
   await f.upload(1, { queue: "rotation" });
   await f.upload(2, { queue: "rotation" });
@@ -426,6 +426,14 @@ test("the frame's buttons: next picture, and a status check that changes nothing
   const next = await f.dev({ "x-next": "1", "if-none-match": etag });
   assert.equal(next.status, 200);
   assert.notEqual(next.headers.get("etag"), etag);
+
+  const back = await f.dev({ "x-prev": "1", "if-none-match": next.headers.get("etag") });
+  assert.equal(back.status, 200);
+  assert.equal(back.headers.get("etag"), etag, "the picture from before");
+
+  // A frame showing something else (here, nothing) gets the picture that's up, not the next one
+  const fresh = await f.dev({ "x-next": "1" });
+  assert.equal(fresh.headers.get("etag"), etag);
 });
 
 test("upside down: the frame draws the same picture again, turned", async () => {
