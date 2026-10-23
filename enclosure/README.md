@@ -31,18 +31,18 @@ Most of these numbers came from a photo, so measure your parts first:
 - **`usb_overhang`** (0): if the USB-C socket sticks out past the board edge by more than 0.3 mm, set this to how far. It cuts a groove up the inside of the wall so the socket can slide in when the back plate goes in.
 - **`btn_from_back`** (8.15 mm, measured): how far the centre of each plunger sits from the back face of the frame. The holes and caps are centred on this height.
 - **`sw_window`** (3.84 mm, measured): the opening in the switch body. The knob slides 3.84 − 1.55 = 2.29 mm in it. `sw_on_from_btn` (10.75 mm, measured) places it in the ON position, counted from the last button, and OFF is `sw_travel` back toward the buttons. The slot is also 1.5 mm taller than it needs to be (`sw_z_play`, 0.75 mm on each side), because the knob's distance from the back (`sw_from_back`, 8.15 mm) doesn't seem to be exactly the same each time.
-- **`sw_post_len`** (1.5 mm): how far the knob sticks out of the switch body. The cap goes `sw_grip` (1 mm) onto it.
+- **`sw_post_len`** (2.0 mm): how far the knob sticks out of the switch body. The cap goes 0.2 mm less than that onto it.
 - **`btn_tip`** (0): where the tip of each plunger sits relative to the board edge. It's negative if the tip stops short of the edge. Each cap's sleeve reaches in to the plunger, so this sets how long the caps are.
-- **`btn_post_len`** (1.5 mm): how far each plunger sticks out of the switch body. Each cap goes `btn_grip` (1 mm) onto the plunger and no further, because its socket is closed at the end. The model refuses to render unless `btn_travel` (0.3 mm) plus 0.1 mm is left between the cap and the switch body, so the cap doesn't hold the button down.
+- **`btn_post_len`** (2.0 mm): how far each plunger sticks out of the switch body. Each cap goes as far onto the plunger as it can and still leave `btn_travel` (0.3 mm) plus 0.1 mm clear of the switch body, so it doesn't hold the button down. Its socket is closed at the end, so it stops on the plunger tip. If the caps sit on the switch bodies, this number is too big.
 - **`aa_top`** (5 mm): the gap between the top edge of the glass and the top of the image area. The bottom border, on the FPC side, works out to 10 mm, and each side to 4.5 mm.
 
 The quickest check is to print only a strip of the top wall and hold your board against it.
 
 ### Button caps
 
-The plungers taper from 2.35 mm at the base to 2.3 mm at the tip. The socket in each cap is drawn at 2.3 mm (`btn_bore`). Small printed holes usually come out about 0.1 mm undersize, and that gives the press fit. Print `fit_test.stl` first. It has four button caps with sockets of 2.2, 2.3, 2.4 and 2.5 mm, marked with 1 to 4 dots on the outer face. Push each one onto a plunger, and set `btn_bore` to the socket size of the one that holds firmly without splitting.
+The plungers taper from 2.35 mm at the base to 2.3 mm at the tip. The socket in each cap is drawn at 2.5 mm (`btn_bore`), because small printed holes come out undersize. Print `fit_test.stl` first. It has four button caps with sockets of 2.4, 2.5, 2.6 and 2.7 mm, marked with 1 to 4 dots on the outer face. Push each one onto a plunger, and set `btn_bore` to the socket size of the one that holds firmly without splitting.
 
-The switch knob is a 1.55 mm square, and its cap's socket is drawn at that size (`sw_socket`). The fit test also has three switch caps with sockets of 1.45, 1.55 and 1.65 mm, marked with 1 to 3 dots. Set `sw_socket` the same way.
+The switch knob is a 1.55 mm square, and its cap's socket is drawn at 1.75 mm (`sw_socket`). The fit test also has three switch caps with sockets of 1.65, 1.75 and 1.85 mm, marked with 1 to 3 dots. Set `sw_socket` the same way.
 
 ## Rendering
 

@@ -86,10 +86,9 @@ btn_pitch = 9.16;        // button to button
 btn_dir = 1;             // which way they run from the USB-C (model X); flip with usb_x
 btn_from_back = 8.15;    // plunger centre to the back face of the frame
 btn_tip = 0;             // plunger tip past the board edge; negative if it stops short of it
-btn_post_len = 1.5;      // plunger length out of the switch body
+btn_post_len = 2.0;      // plunger length out of the switch body; sets how deep the caps go
 btn_post_d = 2.3;        // plunger at the tip (2.35 at the base)
-btn_bore = 2.3;          // socket in the cap; printed holes come out ~0.1 small, which is the grip
-btn_grip = 1.0;          // how far the cap goes onto the plunger; the socket is blind so it stops there
+btn_bore = 2.5;          // socket in the cap; printed holes come out small, so this is over the 2.3 tip
 btn_travel = 0.3;        // switch travel, kept clear between the cap and the switch body
 btn_wall = 0.5;          // sleeve around the plunger
 btn_head_d = 4.4;        // the part in the wall
@@ -105,10 +104,9 @@ sw_window = 3.84;        // opening in the switch body; the knob slides this les
 sw_from_back = 8.15;     // knob centre to the back face of the frame
 sw_z_play = 0.75;        // extra slot height on each side, front and back
 sw_knob = 1.55;          // square knob
-sw_socket = 1.55;        // square socket in the cap; prints a little small, which is the grip
+sw_socket = 1.75;        // square socket in the cap; printed holes come out small, so this is over the 1.55 knob
 sw_tip = 0;              // knob tip past the board edge; negative if it stops short of it
-sw_post_len = 1.5;       // knob length out of the switch body
-sw_grip = 1.0;           // how far the cap goes onto the knob; the socket is blind
+sw_post_len = 2.0;       // knob length out of the switch body; sets how deep the cap goes
 sw_wall = 0.6;           // stem around the knob
 sw_clr = 0.25;           // per side, stem to slot
 sw_tab = [8, 6.5, 1.5];  // the part you push: along the wall, front to back, thickness
@@ -210,6 +208,9 @@ btn_x = [for (i = [0 : len(btn_names) - 1]) usb_x + btn_dir * (btn_first + i * b
 btn_z = D - btn_from_back;
 btn_above_pcb = pcb_front_z - btn_z;
 btn_hole_d = btn_head_d + 2 * btn_clr;
+// The sockets are blind and stop on the tip, as far down the post as leaves the switch body clear.
+btn_grip = btn_post_len - btn_travel - 0.1;
+sw_grip = sw_post_len - 0.2;
 btn_sleeve_d = btn_bore + 2 * btn_wall;
 btn_tip_y = board_top_y + btn_tip;              // plunger tip = bottom of the socket
 btn_out_y = H / 2 + btn_proud;                  // outer face of the cap
@@ -254,7 +255,6 @@ assert(usb_z + usb_hole_h / 2 < plate_in_z, "USB-C opening runs into the back re
 assert(btn_z - btn_hole_d / 2 > lip && btn_z + btn_hole_d / 2 < plate_in_z, "button holes run out of the top wall");
 assert(btn_dir * (btn_x[0] - usb_x) - btn_hole_d / 2 - usb_hole_w / 2 > 1, "first button hole runs into the USB-C opening");
 assert(max([for (x = btn_x) abs(x)]) + btn_hole_d / 2 < board_len / 2, "buttons run past the board");
-assert(btn_post_len - btn_grip >= btn_travel + 0.1, "cap would sit on the switch body; shorten btn_grip");
 assert(btn_tip_y < wall_in_y, "plungers stick into the wall; the back plate won't go in");
 assert(abs(sw_off_x - btn_x[len(btn_x) - 1]) - sw_tab[0] / 2 > btn_head_d / 2 + 0.5, "switch tab runs into the last button cap");
 assert(abs(sw_on_x) + sw_tab[0] / 2 < W / 2 - R, "switch tab runs off the end of the wall");
@@ -262,7 +262,6 @@ assert(abs(sw_on_x) + sw_slot_l / 2 < board_len / 2 + 1, "switch slot runs past 
 assert(sw_z - sw_slot_h / 2 > lip && sw_z + sw_slot_h / 2 < plate_in_z, "switch slot runs out of the top wall");
 assert(sw_z - sw_tab[1] / 2 > front_chamfer && sw_z + sw_tab[1] / 2 < D, "switch tab sticks out past the frame");
 assert(sw_tip_y < wall_in_y, "switch knob sticks into the wall; the back plate won't go in");
-assert(sw_post_len - sw_grip >= 0.2, "switch cap would rub on the switch body; shorten sw_grip");
 assert(pcb_front_z - sw_z - sw_stem / 2 >= 0.15, str("switch cap only clears the PCB by ", pcb_front_z - sw_z - sw_stem / 2, " mm"));
 assert(btn_above_pcb - btn_sleeve_d / 2 >= 0.15, str("cap sleeve only clears the PCB by ", btn_above_pcb - btn_sleeve_d / 2, " mm"));
 assert(pcb_front_z - panel_back_z >= board_clearance + 0.5, str("only ", pcb_front_z - panel_back_z, " mm above the board"));
